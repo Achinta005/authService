@@ -1,6 +1,7 @@
 import { AppDataSource } from "../config/db";
 import { UserProfile } from "../entities/uerProfile";
 import { UserPreferences } from "../entities/userPreference";
+import { UserRole } from "../entities/userRole";
 import { Repository } from "typeorm";
 import { CloudinaryService } from "./cloudinaryServices";
 import { BadRequestException, NotFoundException } from "../utils/exception";
@@ -8,11 +9,13 @@ import { BadRequestException, NotFoundException } from "../utils/exception";
 export class UserProfileService {
   private userProfileRepo: Repository<UserProfile>;
   private userPreferencesRepo: Repository<UserPreferences>;
+  private userRoleRepo: Repository<UserRole>;
   private cloudinaryService: CloudinaryService;
 
   constructor() {
     this.userProfileRepo = AppDataSource.getRepository(UserProfile);
     this.userPreferencesRepo = AppDataSource.getRepository(UserPreferences);
+    this.userRoleRepo = AppDataSource.getRepository(UserRole);
     this.cloudinaryService = new CloudinaryService();
   }
 
@@ -192,7 +195,11 @@ export class UserProfileService {
 
   // ============ DELETE PROFILE ============
   async deleteProfile(userId: string) {
-    await this.userProfileRepo.delete({ id: userId });
+    await AppDataSource.transaction(async (manager) => {
+      await manager.delete(UserPreferences, { userId });
+      await manager.delete(UserRole, { userId });
+      await manager.delete(UserProfile, { id: userId });
+    });
   }
 
   // ============ GET ALL PROFILES (ADMIN) ============
