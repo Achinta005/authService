@@ -21,7 +21,7 @@ export class UserRole {
   roleId!: number;
 
   @Column({ nullable: true })
-  assignedBy?: string; // Admin who assigned the role
+  assignedBy?: string;
 
   @CreateDateColumn()
   assignedAt?: Date;

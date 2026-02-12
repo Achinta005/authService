@@ -17,10 +17,10 @@ export class Role {
   id!: number;
 
   @Column({ unique: true })
-  name!: string; // admin, instructor, student, moderator
+  name!: string;
 
   @Column({ unique: true })
-  slug!: string; // admin, instructor, student, moderator
+  slug!: string;
 
   @Column({ nullable: true })
   description?: string;
@@ -29,7 +29,7 @@ export class Role {
   isActive!: boolean;
 
   @Column({ default: false })
-  isSystem!: boolean; // System roles can't be deleted
+  isSystem!: boolean;
 
   @ManyToMany(() => Permission, (permission) => permission.roles, {
     cascade: true,

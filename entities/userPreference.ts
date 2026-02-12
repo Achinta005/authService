@@ -15,7 +15,7 @@ export class UserPreferences {
   language!: string;
 
   @Column({ default: "light" })
-  theme?: string; // light, dark, auto
+  theme?: string;
 
   @Column({ default: true })
   emailNotifications?: boolean;

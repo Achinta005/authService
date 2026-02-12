@@ -13,7 +13,7 @@ export class Permission {
   id!: number;
 
   @Column({ unique: true })
-  name!: string; // users.read, courses.create, etc.
+  name!: string;
 
   @Column({ unique: true })
   slug!: string;
@@ -22,10 +22,10 @@ export class Permission {
   description?: string;
 
   @Column()
-  resource?: string; // users, courses, payments, etc.
+  resource?: string;
 
   @Column()
-  action!: string; // read, create, update, delete, manage
+  action!: string;
 
   @ManyToMany(() => Role, (role) => role.permissions)
   roles!: Role[];

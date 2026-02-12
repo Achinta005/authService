@@ -27,7 +27,6 @@ export class UserProfile {
   @BeforeInsert()
   setUsernameFromEmail() {
     if (!this.username) {
-      // Generate username from email if not provided
       if (this.email) {
         this.username = this.email.split('@')[0];
       } else if (this.fullName) {

@@ -1,10 +1,8 @@
 import { getMongoDb } from "../config/mongodb";
-import {
-  LoginLog,
-  AuditLog,
-  ActivityLog,
-  SecurityEvent,
-} from "../models/loginLogs";
+import { LoginLog } from "../models/loginLogs";
+import { AuditLog } from "../models/AuditLog";
+import { ActivityLog } from "../models/ActivityLog";
+import { SecurityEvent } from "../models/SecurityEvent";
 
 export class LogService {
   private get db() {
