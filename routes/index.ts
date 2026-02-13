@@ -7,15 +7,6 @@ import adminRoutes from "./adminRoutes";
 
 const router = Router();
 
-// Health check
-router.get("/health", (req, res) => {
-  res.json({
-    success: true,
-    message: "Auth microservice is running",
-    timestamp: new Date().toISOString(),
-  });
-});
-
 // API routes
 router.use("/auth", createAuthRoutes());
 router.use("/mfa", mfaRoutes);
