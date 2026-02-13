@@ -7,30 +7,46 @@ import {
   OneToMany,
   BeforeInsert,
   BeforeUpdate,
+  Index,
+  Unique,
 } from "typeorm";
 import { UserRole } from "./userRole";
 
 @Entity("user_profiles")
+@Unique("UQ_email_per_project", ["email", "projectName", "projectId"]) // Email unique per project
+@Unique("UQ_username_per_project", ["username", "projectName", "projectId"]) // Username unique per project
+@Index("IDX_user_profiles_email", ["email"]) // For faster email lookups
+@Index("IDX_user_profiles_project", ["projectName", "projectId"]) // For project queries
+@Index("IDX_user_profiles_id_project", ["id", "projectName", "projectId"]) // For user-project lookups
 export class UserProfile {
+  // ✅ COMPOSITE PRIMARY KEY - Add @PrimaryColumn to all three
   @PrimaryColumn("uuid")
-  id!: string;
+  id!: string; // Supabase Auth user ID
 
-  @Column({ unique: true })
+  @PrimaryColumn() // ✅ Added - part of composite primary key
+  projectName!: string;
+
+  @PrimaryColumn() // ✅ Added - part of composite primary key
+  projectId!: number;
+
+  @Column()
   email!: string;
 
   @Column({ nullable: true })
   fullName?: string;
 
-  @Column({ nullable: true, unique: true })
+  @Column({ nullable: true })
   username?: string;
 
   @BeforeInsert()
   setUsernameFromEmail() {
     if (!this.username) {
       if (this.email) {
-        this.username = this.email.split('@')[0];
+        const baseUsername = this.email.split('@')[0];
+        this.username = `${baseUsername}_${this.projectName}`;
       } else if (this.fullName) {
-        this.username = this.fullName.trim().split(/\s+/)[0].toLowerCase();
+        const baseUsername = this.fullName.trim().split(/\s+/)[0].toLowerCase();
+        this.username = `${baseUsername}_${this.projectName}`;
       }
     }
   }
@@ -39,9 +55,11 @@ export class UserProfile {
   updateUsernameIfMissing() {
     if (!this.username) {
       if (this.email) {
-        this.username = this.email.split('@')[0];
+        const baseUsername = this.email.split('@')[0];
+        this.username = `${baseUsername}_${this.projectName}`;
       } else if (this.fullName) {
-        this.username = this.fullName.trim().split(/\s+/)[0].toLowerCase();
+        const baseUsername = this.fullName.trim().split(/\s+/)[0].toLowerCase();
+        this.username = `${baseUsername}_${this.projectName}`;
       }
     }
   }

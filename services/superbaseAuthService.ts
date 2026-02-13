@@ -2,28 +2,49 @@ import { supabaseAdmin, supabaseClient } from "../config/superbase";
 import { createClient, User } from "@supabase/supabase-js";
 
 export class SupabaseAuthService {
-  // ============ SIGNUP ============
+  async getUserByEmail(email: string) {
+    try {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+
+      if (error) throw error;
+
+      const user = data.users.find((u) => u.email === email);
+      return user || null;
+    } catch (error) {
+      console.error("Error fetching user by email:", error);
+      return null;
+    }
+  }
+
+  // ✅ ALSO UPDATE: Use supabaseAdmin for signup to auto-confirm email
   async signUp(
     email: string,
     password: string,
     options?: {
       fullName?: string;
+      projectName?: string;
+      projectId?: number;
       emailRedirectTo?: string;
     },
   ) {
-    const { data, error } = await supabaseClient.auth.signUp({
+    // ✅ Use admin client to create user and auto-confirm
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      options: {
-        data: {
-          fullName: options?.fullName,
-        },
-        emailRedirectTo: options?.emailRedirectTo,
+      email_confirm: true,
+      user_metadata: {
+        fullName: options?.fullName,
+        projectName: options?.projectName,
+        projectId: options?.projectId,
       },
     });
 
     if (error) throw error;
-    return data;
+
+    return {
+      user: data.user,
+      session: null, // Admin createUser doesn't return session
+    };
   }
 
   // ============ LOGIN ============

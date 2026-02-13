@@ -162,19 +162,32 @@ export class RoleService {
   }
 
   // ============ USER ROLE ASSIGNMENT ============
-  async assignRoleToUser(userId: string, roleId: number, assignedBy?: string) {
-    // Check if user already has this role
+  async assignRoleToUser(
+    userId: string,
+    roleId: number,
+    projectId: number,
+    projectName: string,
+    assignedBy?: string,
+  ) {
+    // Check if user already has this role for this specific project
     const existingUserRole = await this.userRoleRepo.findOne({
-      where: { userId, roleId },
+      where: {
+        userId,
+        roleId,
+        projectId,
+        projectName,
+      },
     });
 
     if (existingUserRole) {
-      throw new Error("User already has this role");
+      throw new Error(`User already has this role for project ${projectName}`);
     }
 
     const userRole = this.userRoleRepo.create({
       userId,
       roleId,
+      projectName,
+      projectId,
       assignedBy,
     });
 
@@ -233,5 +246,4 @@ export class RoleService {
 
     return roleSlugs.some((slug) => userRoleSlugs.includes(slug));
   }
-  
 }

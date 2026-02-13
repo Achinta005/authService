@@ -202,12 +202,14 @@ export class AdminController {
   assignRole = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId } = req.params;
-      const { roleId } = req.body;
+      const { roleId, projectName, projectId } = req.body;
       const adminId = (req as any).user.id;
 
       await this.roleService.assignRoleToUser(
         Array.isArray(userId) ? userId[0] : userId,
         roleId,
+        projectId,
+        projectName,
         adminId,
       );
 

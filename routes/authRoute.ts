@@ -108,7 +108,6 @@ export const createAuthRoutes = () => {
     authController.refreshToken,
   );
 
-  // Protected routes
   router.post(
     "/logout",
     apiKeyMiddleware.requirePermission("admin"),

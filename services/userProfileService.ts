@@ -21,15 +21,19 @@ export class UserProfileService {
 
   // ============ CREATE USER PROFILE ============
   async createProfile(data: {
-    id: string; // Supabase user ID
+    id: string;
     email: string;
     fullName?: string;
+    projectName?: string;
+    projectId?: number;
     metadata?: Record<string, any>;
   }) {
     const profile = this.userProfileRepo.create({
       id: data.id,
       email: data.email,
       fullName: data.fullName,
+      projectName: data.projectName,
+      projectId: data.projectId,
       metadata: data.metadata,
       isActive: true,
       isEmailVerified: false,
@@ -56,6 +60,50 @@ export class UserProfileService {
     }
 
     return profile;
+  }
+
+  // services/userProfileService.ts
+
+  async getProfileByIdandProjDetails(
+    userId: string,
+    projectName: string,
+    projectId: number,
+  ) {
+    console.log("🔍 [USER PROFILE] Searching for profile:", {
+      userId,
+      projectName,
+      projectId,
+    });
+
+    const start = Date.now();
+    const profile = await this.userProfileRepo.findOne({
+      where: {
+        id: userId,
+        projectName: projectName,
+        projectId: projectId,
+      },
+      relations: ["userRoles", "userRoles.role"]
+    });
+    const duration = Date.now() - start;
+
+    console.log(`⏱️ [USER PROFILE] Query took ${duration}ms`);
+
+    if (profile) {
+      console.log("✅ [USER PROFILE] Profile found:", {
+        id: profile.id,
+        email: profile.email,
+        username: profile.username,
+        projectName: profile.projectName,
+        projectId: profile.projectId,
+      });
+    } else {
+      console.log(
+        "ℹ️ [USER PROFILE] Profile not found - this is OK for new project registration",
+      );
+    }
+
+    // ✅ Return null instead of throwing error
+    return profile || null;
   }
 
   // ============ GET PROFILE BY EMAIL ============

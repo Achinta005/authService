@@ -38,13 +38,13 @@
     "multer": "^2.0.2",
     "pg": "^8.18.0",
     "reflect-metadata": "^0.2.2",
-    "ts-node": "^10.9.2",
-    "typeorm": "^0.3.28",
     "typescript": "^5.9.3",
     "uuid": "^13.0.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "@types/bcrypt": "^6.0.0"
+    "@types/bcrypt": "^6.0.0",
+    "ts-node": "^10.9.2",
+    "typeorm": "^0.3.28"
   }
 }

@@ -28,7 +28,7 @@ export const registerValidator = [
     .withMessage("Full name must be at least 2 characters"),
   body("role")
     .optional()
-    .isIn(["student", "instructor"])
+    .isIn(["student", "instructor","admin",'user'])
     .withMessage("Invalid role"),
 ];
 

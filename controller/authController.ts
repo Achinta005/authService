@@ -20,87 +20,225 @@ export class AuthController {
   // ============ REGISTER ============
   register = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      console.log("📥 [AUTH MICROSERVICE] Registration request received");
-      console.log("Body:", JSON.stringify({ ...req.body, password: "***" }));
+      const {
+        email,
+        password,
+        fullName,
+        role,
+        redirectTo,
+        projectName,
+        projectId,
+      } = req.body;
 
-      const { email, password, fullName, role, redirectTo } = req.body;
-
-      if (!email || !password || !fullName) {
-        console.warn("❌ Missing required fields");
+      if (
+        !email ||
+        !password ||
+        !fullName ||
+        !role ||
+        !redirectTo ||
+        !projectName ||
+        !projectId
+      ) {
+        console.warn("❌ [REGISTER] Missing required fields");
         return res.status(400).json({
           success: false,
-          message: "Email, password, and fullName are required",
+          message:
+            "Email, password, fullName, Role, Project Details are required",
         });
       }
 
-      // Sign up via Supabase
-      console.log("🚀 Calling Supabase signUp...");
-      const { user, session } = await this.supabaseAuth.signUp(
+      let userId: string;
+      let isNewUser = false;
+      let session = null;
+
+      const existingUser = await this.supabaseAuth.getUserByEmail(email);
+
+      if (existingUser) {
+
+        userId = existingUser.id;
+
+        const existingProfile =
+          await this.userProfileService.getProfileByIdandProjDetails(
+            userId,
+            projectName,
+            projectId,
+          );
+
+        if (existingProfile) {
+          console.warn(
+            `⚠️ [REGISTER] User ${email} already registered for project ${projectName}`,
+          );
+          console.warn("⚠️ [REGISTER] Existing profile:", {
+            profileId: existingProfile.id,
+            email: existingProfile.email,
+            projectName: existingProfile.projectName,
+            projectId: existingProfile.projectId,
+            createdAt: existingProfile.createdAt,
+          });
+
+          return res.status(409).json({
+            success: false,
+            message: `User already registered for project ${projectName}`,
+          });
+        }
+
+        console.log(
+          " [REGISTER] User not registered for this project. Proceeding with profile creation.",
+        );
+      } else {
+
+        const signUpStart = Date.now();
+        const { user, session: newSession } = await this.supabaseAuth.signUp(
+          email,
+          password,
+          {
+            fullName,
+            projectName,
+            projectId,
+            emailRedirectTo: redirectTo,
+          },
+        );
+        const signUpDuration = Date.now() - signUpStart;
+
+        if (!user) {
+          console.error("[REGISTER] Supabase returned no user");
+          return res.status(400).json({
+            success: false,
+            message: "Registration failed",
+          });
+        }
+
+        console.log("[REGISTER] New user created in Supabase Auth:", {
+          userId: user.id,
+          email: user.email,
+          emailConfirmed: user.email_confirmed_at,
+          createdAt: user.created_at,
+        });
+
+        userId = user.id;
+        session = newSession;
+        isNewUser = true;
+      }
+
+      console.log("[REGISTER] Creating user profile in PostgreSQL:", {
+        userId,
         email,
-        password,
+        fullName,
+        projectName,
+        projectId,
+      });
+
+      const profileStart = Date.now();
+      const profile = await this.userProfileService.createProfile({
+        id: userId,
+        email: email,
+        fullName,
+        projectName,
+        projectId,
+      });
+      const profileDuration = Date.now() - profileStart;
+
+      console.log(
+        `[REGISTER] Profile created successfully in ${profileDuration}ms:`,
         {
-          fullName,
-          emailRedirectTo: redirectTo,
+          profileId: profile.id,
+          email: profile.email,
+          username: profile.username,
+          projectName: profile.projectName,
+          projectId: profile.projectId,
         },
       );
 
-      if (!user) {
-        console.error("❌ Supabase returned no user");
-        return res.status(400).json({
-          success: false,
-          message: "Registration failed",
+      console.log("[REGISTER] Fetching role:", role);
+      const defaultRole = await this.roleService.getRoleBySlug(role);
+
+      if (defaultRole) {
+        console.log("[REGISTER] Role found:", {
+          roleId: defaultRole.id,
+          roleName: defaultRole.name,
+          roleSlug: defaultRole.slug,
         });
+
+        console.log("[REGISTER] Assigning role to user:", {
+          userId,
+          roleId: defaultRole.id,
+          projectId,
+        });
+
+        const roleAssignStart = Date.now();
+        await this.roleService.assignRoleToUser(
+          userId,
+          defaultRole.id,
+          projectId,
+          projectName,
+        );
+        const roleAssignDuration = Date.now() - roleAssignStart;
+
+        console.log(
+          `[REGISTER] Role assigned successfully in ${roleAssignDuration}ms`,
+        );
+      } else {
+        console.warn(` [REGISTER] Role not found for slug: ${role}`);
       }
 
-      console.log(`✅ Supabase user created: ${user.id}`);
-
-      // Create extended profile in PostgreSQL
-      console.log("📝 Creating user profile...");
-      const profile = await this.userProfileService.createProfile({
-        id: user.id,
-        email: user.email!,
-        fullName,
+      console.log("[REGISTER] Creating audit log:", {
+        userId,
+        action: isNewUser ? "user.registered" : "user.registered_new_project",
+        projectName,
+        projectId,
       });
 
-      // Assign default role
-      console.log(`🎭 Assigning role: ${role}`);
-      const defaultRole = await this.roleService.getRoleBySlug(role);
-      if (defaultRole) {
-        await this.roleService.assignRoleToUser(user.id, defaultRole.id);
-      }
-
-      // Log audit event
-      console.log("📊 Creating audit log...");
+      const auditStart = Date.now();
       await this.logService.createAuditLog({
-        userId: user.id,
-        action: "user.registered",
+        userId: userId,
+        action: isNewUser ? "user.registered" : "user.registered_new_project",
         resource: "user",
-        resourceId: user.id,
+        resourceId: userId,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        metadata: { projectName, projectId },
         timestamp: new Date(),
       });
+      const auditDuration = Date.now() - auditStart;
 
-      console.log("✅ [AUTH MICROSERVICE] Registration completed successfully");
+      console.log(`[REGISTER] Audit log created in ${auditDuration}ms`);
+
+      console.log("[REGISTER] Registration completed successfully:", {
+        userId,
+        email,
+        projectName,
+        isNewUser,
+        hasSession: !!session,
+      });
 
       res.status(201).json({
         success: true,
-        message: "Registration successful. Please verify your email.",
+        message: isNewUser
+          ? "Registration successful. Please verify your email."
+          : `Successfully registered for project ${projectName}`,
         data: {
           user: {
-            id: user.id,
-            email: user.email,
+            id: userId,
+            email: email,
             fullName: profile.fullName,
+            projectName,
           },
           session,
+          isNewUser,
         },
       });
     } catch (error: any) {
+      console.error("❌ [REGISTER] Registration error:", error.message);
+      console.error("❌ [REGISTER] Error name:", error.name);
+      console.error("❌ [REGISTER] Error code:", error.code);
+      console.error("❌ [REGISTER] Stack trace:", error.stack);
+
+      // Log the full error object for debugging
       console.error(
-        "❌ [AUTH MICROSERVICE] Registration error:",
-        error.message,
+        "❌ [REGISTER] Full error object:",
+        JSON.stringify(error, null, 2),
       );
-      console.error("Stack:", error.stack);
+
       next(error);
     }
   };
@@ -108,8 +246,7 @@ export class AuthController {
   // ============ LOGIN ============
   login = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      console.log("📥 [AUTH MICROSERVICE] Login request received");
-      const { email, password } = req.body;
+      const { email, password, projectName, projectId } = req.body;
 
       // Authenticate via Supabase
       const { user, session } = await this.supabaseAuth.signInWithPassword(
@@ -143,11 +280,22 @@ export class AuthController {
       }
 
       // Get user profile
-      const profile = await this.userProfileService.getProfileById(user.id);
-
+      const profile =
+        await this.userProfileService.getProfileByIdandProjDetails(
+          user.id,
+          projectName,
+          projectId,
+        );
+      if (!profile) {
+        console.warn(" Account Not Found");
+        return res.status(403).json({
+          success: false,
+          message: "Account not Found",
+        });
+      }
       // Check if account is active
       if (!profile.isActive) {
-        console.warn("❌ Account deactivated");
+        console.warn(" Account deactivated");
         return res.status(403).json({
           success: false,
           message: "Account is deactivated",
@@ -173,7 +321,7 @@ export class AuthController {
         createdAt: new Date(),
       });
 
-      console.log("✅ [AUTH MICROSERVICE] Login successful");
+      console.log("[AUTH MICROSERVICE] Login successful");
 
       // Set httpOnly cookies
       res.cookie("access_token", session.access_token, {
