@@ -34,7 +34,6 @@ export class AuthController {
         !email ||
         !password ||
         !fullName ||
-        !role ||
         !redirectTo ||
         !projectName ||
         !projectId
