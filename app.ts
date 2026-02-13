@@ -14,7 +14,7 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: config.frontend.url,
+    origin: ['http://localhost:3000','https://appsy-ivory.vercel.app'],
     credentials: true,
   }),
 );
