@@ -29,7 +29,20 @@ export class UserController {
 
       const updates = { ...req.body };
       const auditChanges = { ...req.body };
-
+      if (req.body.email && req.body.email !== undefined) {
+        await this.logService.createSecurityEvent({
+          userId,
+          eventType: "unauthorized_email_change_attempt",
+          severity: "medium",
+          description:
+            "User attempted to change email through profile update (restricted)",
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          resolved: true,
+          metadata: { attemptedEmail: req.body.email },
+          timestamp: new Date(),
+        });
+      }
       // Remove restricted fields
       delete updates.id;
       delete updates.email;

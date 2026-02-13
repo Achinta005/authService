@@ -1,4 +1,3 @@
-// src/services/AnalyticsService.ts
 import { getMongoDb } from "../config/mongodb";
 import { LogService } from "./logService";
 

@@ -53,7 +53,6 @@ export class AuthController {
       const existingUser = await this.supabaseAuth.getUserByEmail(email);
 
       if (existingUser) {
-
         userId = existingUser.id;
 
         const existingProfile =
@@ -85,7 +84,6 @@ export class AuthController {
           " [REGISTER] User not registered for this project. Proceeding with profile creation.",
         );
       } else {
-
         const signUpStart = Date.now();
         const { user, session: newSession } = await this.supabaseAuth.signUp(
           email,
@@ -272,10 +270,27 @@ export class AuthController {
           createdAt: new Date(),
         });
 
-        return res.status(401).json({
-          success: false,
-          message: "Invalid credentials",
-        });
+        const failedAttempts =
+          await this.logService.getFailedLoginAttempts(3600000);
+        const userFailedAttempts = failedAttempts.find((f) => f._id === email);
+
+        if (userFailedAttempts && userFailedAttempts.attempts >= 3) {
+          await this.logService.createSecurityEvent({
+            userId: "",
+            eventType: "brute_force_attempt",
+            severity: userFailedAttempts.attempts >= 5 ? "high" : "medium",
+            description: `${userFailedAttempts.attempts} failed login attempts for ${email}`,
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            resolved: false,
+            metadata: {
+              email,
+              attemptCount: userFailedAttempts.attempts,
+              ipAddresses: userFailedAttempts.ipAddresses,
+            },
+            timestamp: new Date(),
+          });
+        }
       }
 
       // Get user profile
@@ -389,7 +404,20 @@ export class AuthController {
       }
 
       console.log("✅ Session refreshed successfully");
-
+      await this.logService.createLoginLog({
+        userId: user.id,
+        email: user.email!,
+        loginMethod: "email",
+        success: true,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        device: this.extractDevice(req.get("user-agent") || ""),
+        browser: this.extractBrowser(req.get("user-agent") || ""),
+        os: this.extractOS(req.get("user-agent") || ""),
+        mfaUsed: false,
+        sessionId: session.access_token,
+        createdAt: new Date(),
+      });
       // Update cookies
       res.cookie("access_token", session.access_token, {
         httpOnly: true,
@@ -435,8 +463,22 @@ export class AuthController {
       if (!accessToken) {
         console.warn("⚠️ No access token for logout");
       } else {
+        const user = await this.supabaseAuth.getUserFromToken(accessToken);
+
         await this.supabaseAuth.logout(accessToken);
         console.log("✅ Session revoked in Supabase");
+
+        if (user) {
+          await this.logService.createAuditLog({
+            userId: user.id,
+            action: "user.logout",
+            resource: "session",
+            resourceId: user.id,
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            timestamp: new Date(),
+          });
+        }
       }
 
       // Clear cookies
@@ -519,7 +561,15 @@ export class AuthController {
       const { email } = req.body;
       const redirectTo = CLIENT_REDIRECT_MAP[req.body.client];
       await this.supabaseAuth.signInWithMagicLink(email, redirectTo);
-
+      await this.logService.createAuditLog({
+        userId: "",
+        action: "magic_link.sent",
+        resource: "auth",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { email },
+        timestamp: new Date(),
+      });
       res.json({
         success: true,
         message: "Magic link sent to your email",
@@ -535,7 +585,26 @@ export class AuthController {
       const { email, redirectUrl } = req.body;
 
       await this.supabaseAuth.sendPasswordResetEmail(email, redirectUrl);
+      await this.logService.createAuditLog({
+        userId: "",
+        action: "password.reset_requested",
+        resource: "auth",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { email },
+        timestamp: new Date(),
+      });
 
+      await this.logService.createSecurityEvent({
+        eventType: "password_reset_requested",
+        severity: "low",
+        description: `Password reset requested for ${email}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: { email },
+        timestamp: new Date(),
+      });
       res.json({
         success: true,
         message: "Password reset email sent",
@@ -553,8 +622,6 @@ export class AuthController {
 
       await this.supabaseAuth.updatePassword(user.id, newPassword);
 
-      // Log audit event
-
       await this.logService.createAuditLog({
         userId: user.id,
         action: "password.reset",
@@ -562,6 +629,18 @@ export class AuthController {
         resourceId: user.id,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
+
+      await this.logService.createSecurityEvent({
+        userId: user.id,
+        eventType: "password_changed",
+        severity: "medium",
+        description: "User password was reset via email link",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: { resetMethod: "email_link" },
         timestamp: new Date(),
       });
 
@@ -584,7 +663,15 @@ export class AuthController {
       const { email } = req.body;
 
       await this.supabaseAuth.resendVerificationEmail(email);
-
+      await this.logService.createAuditLog({
+        userId: "",
+        action: "verification.resent",
+        resource: "auth",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { email },
+        timestamp: new Date(),
+      });
       res.json({
         success: true,
         message: "Verification email sent",

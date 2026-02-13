@@ -167,6 +167,10 @@ export class AdminController {
       const { userId } = req.params;
       const adminId = (req as any).user.id;
 
+      const userProfile = await this.userProfileService.getProfileById(
+        Array.isArray(userId) ? userId[0] : userId,
+      );
+
       // Delete from Supabase
       await this.supabaseAuth.deleteUser(
         Array.isArray(userId) ? userId[0] : userId,
@@ -177,7 +181,6 @@ export class AdminController {
         Array.isArray(userId) ? userId[0] : userId,
       );
 
-      // Log audit event
       await this.logService.createAuditLog({
         userId: Array.isArray(userId) ? userId[0] : userId,
         action: "user.deleted",
@@ -186,6 +189,22 @@ export class AdminController {
         performedBy: adminId,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
+
+      await this.logService.createSecurityEvent({
+        userId: Array.isArray(userId) ? userId[0] : userId,
+        eventType: "user_deleted_by_admin",
+        severity: "high",
+        description: `User account "${userProfile?.email}" was deleted by admin`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: {
+          deletedBy: adminId,
+          deletedUserEmail: userProfile?.email,
+          deletedUserName: userProfile?.fullName,
+        },
         timestamp: new Date(),
       });
 
@@ -605,6 +624,7 @@ export class AdminController {
     try {
       const { serviceId } = req.params;
       const { name, scopes, expiresInDays, description } = req.body;
+      const adminId = (req as any).user.id;
 
       // Validate required fields
       if (!name || !scopes || scopes.length === 0) {
@@ -621,7 +641,39 @@ export class AdminController {
         expiresInDays: expiresInDays || 90,
         description,
       });
+      await this.logService.createAuditLog({
+        userId: adminId,
+        action: "api_key.created",
+        resource: "api_key",
+        resourceId: apiKey.id,
+        performedBy: adminId,
+        metadata: {
+          name,
+          serviceId: Array.isArray(serviceId) ? serviceId[0] : serviceId,
+          scopes,
+          expiresInDays: expiresInDays || 90,
+        },
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
 
+      await this.logService.createSecurityEvent({
+        userId: adminId,
+        eventType: "api_key_created",
+        severity: "medium",
+        description: `API key "${name}" created for service ${Array.isArray(serviceId) ? serviceId[0] : serviceId}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: {
+          apiKeyId: apiKey.id,
+          name,
+          scopes,
+          serviceId: Array.isArray(serviceId) ? serviceId[0] : serviceId,
+        },
+        timestamp: new Date(),
+      });
       return res.status(201).json({
         success: true,
         data: apiKey,
@@ -638,11 +690,44 @@ export class AdminController {
   deleteKey = async (req: Request, res: Response) => {
     try {
       const { keyId } = req.params;
+      const adminId = (req as any).user.id;
 
+      const keyDetails = await this.apiKeyService.getApiKeyById(
+        Array.isArray(keyId) ? keyId[0] : keyId,
+      );
       await this.apiKeyService.deleteApiKey(
         Array.isArray(keyId) ? keyId[0] : keyId,
       );
+      await this.logService.createAuditLog({
+        userId: adminId,
+        action: "api_key.deleted",
+        resource: "api_key",
+        resourceId: Array.isArray(keyId) ? keyId[0] : keyId,
+        performedBy: adminId,
+        metadata: {
+          keyName: keyDetails?.name,
+          serviceId: keyDetails?.serviceId,
+        },
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
 
+      // ⚠️ ADD HERE - Security event
+      await this.logService.createSecurityEvent({
+        userId: adminId,
+        eventType: "api_key_deleted",
+        severity: "high",
+        description: `API key "${keyDetails?.name}" was deleted`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: {
+          keyId: Array.isArray(keyId) ? keyId[0] : keyId,
+          keyName: keyDetails?.name,
+        },
+        timestamp: new Date(),
+      });
       return res.status(200).json({
         success: true,
         message: "API key deleted successfully",
@@ -659,11 +744,42 @@ export class AdminController {
   rotateKey = async (req: Request, res: Response) => {
     try {
       const { keyId } = req.params;
+      const adminId = (req as any).user.id;
 
       const apiKey = await this.apiKeyService.rotateApiKey(
         Array.isArray(keyId) ? keyId[0] : keyId,
       );
+      await this.logService.createAuditLog({
+        userId: adminId,
+        action: "api_key.rotated",
+        resource: "api_key",
+        resourceId: Array.isArray(keyId) ? keyId[0] : keyId,
+        performedBy: adminId,
+        metadata: {
+          keyName: apiKey.name,
+          oldKeyId: Array.isArray(keyId) ? keyId[0] : keyId,
+          newKeyId: apiKey.id,
+        },
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
 
+      // ⚠️ ADD HERE - Security event
+      await this.logService.createSecurityEvent({
+        userId: adminId,
+        eventType: "api_key_rotated",
+        severity: "medium",
+        description: `API key "${apiKey.name}" was rotated`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: {
+          oldKeyId: Array.isArray(keyId) ? keyId[0] : keyId,
+          newKeyId: apiKey.id,
+        },
+        timestamp: new Date(),
+      });
       return res.status(200).json({
         success: true,
         data: apiKey,
@@ -692,6 +808,19 @@ export class AdminController {
       const result = await this.apiKeyService.validateApiKey(apiKey);
 
       if (!result.valid) {
+        await this.logService.createSecurityEvent({
+          eventType: "api_key_validation_failed",
+          severity: "medium",
+          description: `Invalid API key validation attempt: ${result.message}`,
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          resolved: true,
+          metadata: {
+            reason: result.message,
+            attemptedKey: apiKey.substring(0, 10) + "...",
+          },
+          timestamp: new Date(),
+        });
         return res.status(401).json({
           success: false,
           message: result.message,
