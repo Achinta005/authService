@@ -1,7 +1,7 @@
-import { AppDataSource } from "../config/db";
-import { ApiKey } from "../entities/apiKey";
-import { Repository } from "typeorm";
-import * as crypto from "crypto";
+import { AppDataSource } from '../config/db';
+import { ApiKey } from '../entities/apiKey';
+import { Repository } from 'typeorm';
+import * as crypto from 'crypto';
 
 export class ApiKeyService {
   private apiKeyRepo: Repository<ApiKey>;
@@ -12,7 +12,7 @@ export class ApiKeyService {
 
   // Generate a secure API key with service prefix
   private generateApiKey(servicePrefix: string): string {
-    const randomBytes = crypto.randomBytes(32).toString("hex");
+    const randomBytes = crypto.randomBytes(32).toString('hex');
     return `${servicePrefix}_${randomBytes}`;
   }
 
@@ -34,7 +34,7 @@ export class ApiKeyService {
     }
 
     // Generate API key with service prefix (e.g., "user_abc123...")
-    const servicePrefix = data.serviceId.split("-")[0];
+    const servicePrefix = data.serviceId.split('-')[0];
     const rawKey = this.generateApiKey(servicePrefix);
 
     // Calculate expiration date
@@ -60,7 +60,7 @@ export class ApiKeyService {
   // Get all API keys
   async getAllApiKeys() {
     const keys = await this.apiKeyRepo.find({
-      order: { createdAt: "DESC" },
+      order: { createdAt: 'DESC' },
     });
     return keys;
   }
@@ -72,7 +72,7 @@ export class ApiKeyService {
     });
 
     if (!key) {
-      throw new Error("API key not found");
+      throw new Error('API key not found');
     }
 
     return key;
@@ -81,13 +81,13 @@ export class ApiKeyService {
   // Verify and validate an API key
   async validateApiKey(rawKey: string) {
     const key = await this.apiKeyRepo.findOne({
-      where: { key: rawKey },
+      where: { key: rawKey, serviceId: 'auth-service' },
     });
 
     if (!key) {
       return {
         valid: false,
-        message: "Invalid API key",
+        message: 'Invalid API key',
       };
     }
 
@@ -95,7 +95,7 @@ export class ApiKeyService {
     if (!key.isActive) {
       return {
         valid: false,
-        message: "API key is inactive",
+        message: 'API key is inactive',
       };
     }
 
@@ -103,7 +103,7 @@ export class ApiKeyService {
     if (new Date(key.expiresAt) <= new Date()) {
       return {
         valid: false,
-        message: "API key has expired",
+        message: 'API key has expired',
       };
     }
 
@@ -129,12 +129,12 @@ export class ApiKeyService {
     });
 
     if (!key) {
-      throw new Error("API key not found");
+      throw new Error('API key not found');
     }
 
     await this.apiKeyRepo.delete({ id: keyId });
 
-    return { message: "API key deleted successfully" };
+    return { message: 'API key deleted successfully' };
   }
 
   // Rotate API key (generate new key for same service)
@@ -142,7 +142,7 @@ export class ApiKeyService {
     const oldKey = await this.getApiKeyById(keyId);
 
     // Generate new key
-    const servicePrefix = oldKey.serviceId.split("-")[0];
+    const servicePrefix = oldKey.serviceId.split('-')[0];
     const newRawKey = this.generateApiKey(servicePrefix);
 
     // Update the key
