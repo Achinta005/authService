@@ -15,6 +15,7 @@
     "@supabase/supabase-js": "^2.95.3",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/express-validator": "^3.0.0",
     "@types/ioredis": "^4.28.10",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
@@ -38,13 +39,13 @@
     "multer": "^2.0.2",
     "pg": "^8.18.0",
     "reflect-metadata": "^0.2.2",
+    "typeorm": "^0.3.28",
     "typescript": "^5.9.3",
     "uuid": "^13.0.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
-    "ts-node": "^10.9.2",
-    "typeorm": "^0.3.28"
+    "ts-node": "^10.9.2"
   }
 }
