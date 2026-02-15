@@ -1,5 +1,5 @@
-import { Request, Response, NextFunction } from 'express';
-import { ApiKeyService } from '../services/apiKeyService';
+import { Request, Response, NextFunction } from "express";
+import { ApiKeyService } from "../services/apiKeyService";
 
 export class ApiKeyMiddleware {
   private apiKeyService: ApiKeyService;
@@ -12,25 +12,24 @@ export class ApiKeyMiddleware {
   requirePermission = (...requiredPermissions: string[]) => {
     return async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const apiKey = req.headers['x-api-key'] as string;
-
+        const apiKey = req.headers["x-api-key"] as string;
         if (!apiKey) {
           return res.status(401).json({
             success: false,
-            message: 'API key is required in x-api-key header',
+            message: "API key is required in x-api-key header",
           });
         }
 
         // Validate API key
         const result = await this.apiKeyService.validateApiKey(
           apiKey,
-          'auth-service',
+          "auth-service",
         );
 
         if (!result.valid || !result.data) {
           return res.status(401).json({
             success: false,
-            message: result.message || 'Invalid API key',
+            message: result.message || "Invalid API key",
           });
         }
 
@@ -38,29 +37,22 @@ export class ApiKeyMiddleware {
           ? result.data.scopes
           : [];
 
-        /* ================= PERMISSION CHECK ================= */
-
-        // Always allow admin (super-scope)
         const hasPermission =
-          scopes.includes('admin') ||
+          scopes.includes("admin") ||
           requiredPermissions.some((perm) => scopes.includes(perm));
 
         if (!hasPermission) {
           return res.status(403).json({
             success: false,
-            message: `Insufficient permissions. Required any of: ${requiredPermissions.join(
-              ', ',
-            )}`,
+            message: `Insufficient permissions. Required any of: ${requiredPermissions.join(", ")}`,
           });
         }
 
         next();
       } catch (error: any) {
-        console.error('❌ [requirePermission] error:', error);
-
         return res.status(500).json({
           success: false,
-          message: 'Internal server error',
+          message: "Internal server error",
         });
       }
     };

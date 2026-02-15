@@ -47,6 +47,7 @@ app.get('/health', (req: Request, res: Response) => {
 app.use(`/api/${config.apiVersion}`, router);
 
 app.get('/', (req: Request, res: Response) => {
+  console.log("get..")
   res.json({
     success: true,
     message: 'Auth Microservice API',
