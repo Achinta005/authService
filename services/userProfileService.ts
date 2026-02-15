@@ -69,11 +69,6 @@ export class UserProfileService {
     projectName: string,
     projectId: number,
   ) {
-    console.log("🔍 [USER PROFILE] Searching for profile:", {
-      userId,
-      projectName,
-      projectId,
-    });
 
     const start = Date.now();
     const profile = await this.userProfileRepo.findOne({
@@ -85,24 +80,7 @@ export class UserProfileService {
       relations: ["userRoles", "userRoles.role"]
     });
     const duration = Date.now() - start;
-
-    console.log(`⏱️ [USER PROFILE] Query took ${duration}ms`);
-
-    if (profile) {
-      console.log("✅ [USER PROFILE] Profile found:", {
-        id: profile.id,
-        email: profile.email,
-        username: profile.username,
-        projectName: profile.projectName,
-        projectId: profile.projectId,
-      });
-    } else {
-      console.log(
-        "ℹ️ [USER PROFILE] Profile not found - this is OK for new project registration",
-      );
-    }
-
-    // ✅ Return null instead of throwing error
+    
     return profile || null;
   }
 

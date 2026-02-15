@@ -79,9 +79,9 @@ export class ApiKeyService {
   }
 
   // Verify and validate an API key
-  async validateApiKey(rawKey: string) {
+  async validateApiKey(rawKey: string,serviceId:string) {
     const key = await this.apiKeyRepo.findOne({
-      where: { key: rawKey, serviceId: 'auth-service' },
+      where: { key: rawKey, serviceId: serviceId },
     });
 
     if (!key) {

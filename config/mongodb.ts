@@ -42,7 +42,6 @@ const createIndexes = async () => {
   await db.collection('security_events').createIndex({ eventType: 1, severity: 1 });
   await db.collection('security_events').createIndex({ ipAddress: 1 });
   
-  console.log('✅ MongoDB indexes created');
 };
 
 export const getMongoDb = (): Db => {

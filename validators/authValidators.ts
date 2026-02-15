@@ -7,7 +7,6 @@ export const logRegisterPayload = (
   _res: Response,
   next: NextFunction,
 ) => {
-  console.log("🧾 REGISTER RAW BODY:", JSON.stringify(req.body, null, 2));
   next();
 };
 

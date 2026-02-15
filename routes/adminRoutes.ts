@@ -201,6 +201,11 @@ router.get(
   adminController.getAllKeys,
 );
 
+router.post('/api/valid',
+  apiKeyMiddleware.requirePermission("admin"),
+  adminController.validateKey
+)
+
 router.post(
   "/api/keys/:serviceId",
   apiKeyMiddleware.requirePermission("admin"),

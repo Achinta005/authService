@@ -30,12 +30,7 @@ export const createAuthRoutes = () => {
     new LogService(),
   );
 
-  router.use((req, _res, next) => {
-    console.log("🔐 Entered auth routes:", req.method, req.originalUrl);
-    next();
-  });
-
-  router.get(
+  router.post(
     "/verify-token",
     apiKeyMiddleware.requirePermission("admin"),
     authController.verifyToken,
@@ -64,6 +59,12 @@ export const createAuthRoutes = () => {
     "/oauth/:provider",
     apiKeyMiddleware.requirePermission("admin"),
     authController.oauthLogin,
+  );
+
+  router.post(
+    "/oauth/callback",
+    apiKeyMiddleware.requirePermission("admin"),
+    authController.oauthCallback,
   );
 
   router.post(
