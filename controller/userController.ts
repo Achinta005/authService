@@ -77,6 +77,19 @@ export class UserController {
         timestamp: new Date(),
       });
 
+      await this.logService.createActivityLog({
+        userId,
+        eventType: "profile_updated",
+        eventCategory: "user",
+        eventLabel: "Profile Update",
+        page: "/profile",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { updatedFields: Object.keys(updates) },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "Profile updated successfully",
@@ -121,6 +134,19 @@ export class UserController {
         },
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
+
+      await this.logService.createActivityLog({
+        userId,
+        eventType: "profile_picture_updated",
+        eventCategory: "user",
+        eventLabel: "Profile Picture Update",
+        page: "/profile",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { changed: result.changed },
         timestamp: new Date(),
       });
 
@@ -195,6 +221,19 @@ export class UserController {
         },
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
+
+       await this.logService.createActivityLog({
+        userId,
+        eventType: "preferences_updated",
+        eventCategory: "user",
+        eventLabel: "Preferences Update",
+        page: "/profile/preferences",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { updatedFields: Object.keys(updates) },
         timestamp: new Date(),
       });
 

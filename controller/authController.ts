@@ -41,7 +41,7 @@ export class AuthController {
 
       let userId: string;
       let isNewUser = false;
-      let session = null;
+      let session: any = null;
 
       const existingUser = await this.supabaseAuth.getUserByEmail(email);
 
@@ -73,7 +73,6 @@ export class AuthController {
           });
         }
       } else {
-        const signUpStart = Date.now();
         const { user, session: newSession } = await this.supabaseAuth.signUp(
           email,
           password,
@@ -84,7 +83,6 @@ export class AuthController {
             emailRedirectTo: redirectTo,
           },
         );
-        const signUpDuration = Date.now() - signUpStart;
 
         if (!user) {
           console.error("[REGISTER] Supabase returned no user");
@@ -99,7 +97,6 @@ export class AuthController {
         isNewUser = true;
       }
 
-      const profileStart = Date.now();
       const profile = await this.userProfileService.createProfile({
         id: userId,
         email: email,
@@ -107,24 +104,20 @@ export class AuthController {
         projectName,
         projectId,
       });
-      const profileDuration = Date.now() - profileStart;
 
       const defaultRole = await this.roleService.getRoleBySlug(role);
 
       if (defaultRole) {
-        const roleAssignStart = Date.now();
         await this.roleService.assignRoleToUser(
           userId,
           defaultRole.id,
           projectId,
           projectName,
         );
-        const roleAssignDuration = Date.now() - roleAssignStart;
       } else {
         console.warn(` [REGISTER] Role not found for slug: ${role}`);
       }
 
-      const auditStart = Date.now();
       await this.logService.createAuditLog({
         userId: userId,
         action: isNewUser ? "user.registered" : "user.registered_new_project",
@@ -135,7 +128,21 @@ export class AuthController {
         metadata: { projectName, projectId },
         timestamp: new Date(),
       });
-      const auditDuration = Date.now() - auditStart;
+
+      await this.logService.createActivityLog({
+        userId,
+        eventType: isNewUser
+          ? "user_registered"
+          : "user_registered_new_project",
+        eventCategory: "auth",
+        eventLabel: isNewUser ? "New Registration" : "Project Registration",
+        page: "/register",
+        sessionId: session?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { projectName, projectId, isNewUser, role },
+        timestamp: new Date(),
+      });
 
       res.status(201).json({
         success: true,
@@ -197,6 +204,27 @@ export class AuthController {
           os: this.extractOS(req.get("user-agent") || ""),
           mfaUsed: false,
           createdAt: new Date(),
+        });
+
+        await this.logService.createActivityLog({
+          userId: user.id,
+          eventType: "user_login",
+          eventCategory: "auth",
+          eventLabel: "Email Login",
+          page: "/login",
+          sessionId: session.access_token,
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          metadata: {
+            projectName,
+            projectId,
+            loginMethod: "email",
+            mfaUsed: null,
+            device: this.extractDevice(req.get("user-agent") || ""),
+            browser: this.extractBrowser(req.get("user-agent") || ""),
+            os: this.extractOS(req.get("user-agent") || ""),
+          },
+          timestamp: new Date(),
         });
 
         const failedAttempts =
@@ -398,6 +426,18 @@ export class AuthController {
             userAgent: req.get("user-agent") || "",
             timestamp: new Date(),
           });
+          await this.logService.createActivityLog({
+            userId: user.id,
+            eventType: "user_logout",
+            eventCategory: "auth",
+            eventLabel: "Logout",
+            page: "/logout",
+            sessionId: accessToken,
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            metadata: { manual: true },
+            timestamp: new Date(),
+          });
         }
       }
 
@@ -547,6 +587,22 @@ export class AuthController {
 
       if (existingProfile) {
         profile = existingProfile;
+        await this.logService.createActivityLog({
+          userId,
+          eventType: "oauth_login",
+          eventCategory: "auth",
+          eventLabel: "OAuth Login - Returning User",
+          sessionId: access_token,
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          metadata: {
+            provider: user.app_metadata?.provider,
+            projectName,
+            projectId,
+            isNewProfile: false,
+          },
+          timestamp: new Date(),
+        });
       } else {
         const createProfileStart = Date.now();
 
@@ -601,6 +657,23 @@ export class AuthController {
               projectName,
               projectId,
               provider: user.app_metadata?.provider,
+            },
+            timestamp: new Date(),
+          });
+
+          await this.logService.createActivityLog({
+            userId,
+            eventType: "oauth_registered",
+            eventCategory: "auth",
+            eventLabel: "OAuth Registration - New Profile",
+            sessionId: access_token,
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            metadata: {
+              provider: user.app_metadata?.provider,
+              projectName,
+              projectId,
+              isNewProfile: true,
             },
             timestamp: new Date(),
           });
@@ -665,6 +738,19 @@ export class AuthController {
         metadata: { email },
         timestamp: new Date(),
       });
+      await this.logService.createActivityLog({
+        userId: "",
+        eventType: "magic_link_requested",
+        eventCategory: "auth",
+        eventLabel: "Magic Link Request",
+        page: "/magic-link",
+        sessionId: "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { email },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "Magic link sent to your email",
@@ -697,6 +783,18 @@ export class AuthController {
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         resolved: true,
+        metadata: { email },
+        timestamp: new Date(),
+      });
+      await this.logService.createActivityLog({
+        userId: "",
+        eventType: "forgot_password_requested",
+        eventCategory: "auth",
+        eventLabel: "Forgot Password",
+        page: "/forgot-password",
+        sessionId: "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
         metadata: { email },
         timestamp: new Date(),
       });
@@ -739,6 +837,19 @@ export class AuthController {
         timestamp: new Date(),
       });
 
+      await this.logService.createActivityLog({
+        userId: user.id,
+        eventType: "password_reset_completed",
+        eventCategory: "auth",
+        eventLabel: "Password Reset",
+        page: "/reset-password",
+        sessionId: "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { resetMethod: "email_link" },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "Password reset successful",
@@ -762,6 +873,18 @@ export class AuthController {
         userId: "",
         action: "verification.resent",
         resource: "auth",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { email },
+        timestamp: new Date(),
+      });
+      await this.logService.createActivityLog({
+        userId: "",
+        eventType: "verification_email_resent",
+        eventCategory: "auth",
+        eventLabel: "Resend Verification",
+        page: "/resend-verification",
+        sessionId: "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         metadata: { email },

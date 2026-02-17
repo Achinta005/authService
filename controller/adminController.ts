@@ -92,6 +92,19 @@ export class AdminController {
         timestamp: new Date(),
       });
 
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_user_updated",
+        eventCategory: "admin",
+        eventLabel: "User Updated",
+        page: "/admin/users",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { targetUserId: userId, updatedFields: Object.keys(updates) },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "User updated successfully",
@@ -123,6 +136,19 @@ export class AdminController {
         timestamp: new Date(),
       });
 
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_user_deactivated",
+        eventCategory: "admin",
+        eventLabel: "User Deactivated",
+        page: "/admin/users",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { targetUserId: userId },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "User deactivated successfully",
@@ -150,6 +176,19 @@ export class AdminController {
         performedBy: adminId,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
+
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_user_activated",
+        eventCategory: "admin",
+        eventLabel: "User Activated",
+        page: "/admin/users",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { targetUserId: userId },
         timestamp: new Date(),
       });
 
@@ -208,6 +247,23 @@ export class AdminController {
         timestamp: new Date(),
       });
 
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_user_deleted",
+        eventCategory: "admin",
+        eventLabel: "User Deleted",
+        page: "/admin/users",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: {
+          targetUserId: userId,
+          deletedEmail: userProfile?.email,
+          deletedName: userProfile?.fullName,
+        },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "User deleted successfully",
@@ -245,6 +301,19 @@ export class AdminController {
         timestamp: new Date(),
       });
 
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_role_assigned",
+        eventCategory: "admin",
+        eventLabel: "Role Assigned",
+        page: "/admin/roles",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { targetUserId: userId, roleId, projectName, projectId },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "Role assigned successfully",
@@ -274,6 +343,19 @@ export class AdminController {
         metadata: { roleId },
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        timestamp: new Date(),
+      });
+
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_role_removed",
+        eventCategory: "admin",
+        eventLabel: "Role Removed",
+        page: "/admin/roles",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { targetUserId: userId, roleId },
         timestamp: new Date(),
       });
 
@@ -674,6 +756,18 @@ export class AdminController {
         },
         timestamp: new Date(),
       });
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_api_key_created",
+        eventCategory: "admin",
+        eventLabel: "API Key Created",
+        page: "/admin/keys",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { keyId: apiKey.id, name, serviceId, scopes },
+        timestamp: new Date(),
+      });
       return res.status(201).json({
         success: true,
         data: apiKey,
@@ -728,6 +822,19 @@ export class AdminController {
         },
         timestamp: new Date(),
       });
+
+      await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_api_key_deleted",
+        eventCategory: "admin",
+        eventLabel: "API Key Deleted",
+        page: "/admin/keys",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { keyId, keyName: keyDetails?.name, serviceId: keyDetails?.serviceId },
+        timestamp: new Date(),
+      });
       return res.status(200).json({
         success: true,
         message: "API key deleted successfully",
@@ -778,6 +885,19 @@ export class AdminController {
           oldKeyId: Array.isArray(keyId) ? keyId[0] : keyId,
           newKeyId: apiKey.id,
         },
+        timestamp: new Date(),
+      });
+
+       await this.logService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_api_key_rotated",
+        eventCategory: "admin",
+        eventLabel: "API Key Rotated",
+        page: "/admin/keys",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { oldKeyId: keyId, newKeyId: apiKey.id, keyName: apiKey.name },
         timestamp: new Date(),
       });
       return res.status(200).json({

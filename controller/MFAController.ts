@@ -37,6 +37,19 @@ export class MFAController {
         timestamp: new Date(),
       });
 
+      await this.logService.createActivityLog({
+        userId,
+        eventType: "mfa_enroll_initiated",
+        eventCategory: "security",
+        eventLabel: "MFA Enrollment Started",
+        page: "/profile/security",
+        sessionId: token,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: {},
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "MFA enrollment initiated",
@@ -80,6 +93,7 @@ export class MFAController {
         userAgent: req.get("user-agent") || "",
         timestamp: new Date(),
       });
+      
 
       // Log security event
       await this.logService.createSecurityEvent({
@@ -90,6 +104,19 @@ export class MFAController {
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         resolved: true,
+        timestamp: new Date(),
+      });
+
+      await this.logService.createActivityLog({
+        userId,
+        eventType: "mfa_enabled",
+        eventCategory: "security",
+        eventLabel: "MFA Enabled",
+        page: "/profile/security",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { factorId },
         timestamp: new Date(),
       });
 
@@ -150,6 +177,19 @@ export class MFAController {
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         resolved: true,
+        timestamp: new Date(),
+      });
+
+      await this.logService.createActivityLog({
+        userId,
+        eventType: "mfa_disabled",
+        eventCategory: "security",
+        eventLabel: "MFA Disabled",
+        page: "/profile/security",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { factorId },
         timestamp: new Date(),
       });
 
