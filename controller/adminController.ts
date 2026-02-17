@@ -456,7 +456,7 @@ export class AdminController {
     next: NextFunction,
   ) => {
     try {
-      const events = await this.logService.getUnresolvedSecurityEvents();
+      const events = await this.logService.getAllSecurityEvents();
 
       res.json({
         success: true,

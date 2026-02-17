@@ -866,9 +866,9 @@ export class AuthController {
     next: NextFunction,
   ) => {
     try {
-      const { email } = req.body;
+      const { email,redirectTo } = req.body;
 
-      await this.supabaseAuth.resendVerificationEmail(email);
+      await this.supabaseAuth.resendVerificationEmail(email,redirectTo);
       await this.logService.createAuditLog({
         userId: "",
         action: "verification.resent",

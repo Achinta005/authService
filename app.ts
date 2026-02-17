@@ -8,6 +8,7 @@ import { errorHandler } from './middlewares/errorHandeller';
 import { generalLimiter } from './middlewares/rateLimitter';
 import { logger } from './utils/logger';
 
+
 const app: Application = express();
 
 app.use(helmet());
@@ -47,7 +48,7 @@ app.get('/health', (req: Request, res: Response) => {
 app.use(`/api/${config.apiVersion}`, router);
 
 app.get('/', (req: Request, res: Response) => {
-  console.log("get..")
+  console.log("get..",process.env.NODE_ENV)
   res.json({
     success: true,
     message: 'Auth Microservice API',

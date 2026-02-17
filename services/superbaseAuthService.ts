@@ -174,12 +174,12 @@ export class SupabaseAuthService {
   }
 
   // ============ RESEND VERIFICATION EMAIL ============
-  async resendVerificationEmail(email: string) {
+  async resendVerificationEmail(email: string,emailRedirectTo:string) {
     const { data, error } = await supabaseClient.auth.resend({
       type: "signup",
       email,
       options: {
-        emailRedirectTo: `${process.env.FRONTEND_URL}/verify-email`,
+        emailRedirectTo: emailRedirectTo,
       },
     });
 
@@ -278,12 +278,12 @@ export class SupabaseAuthService {
   }
 
   // ============ ADMIN: INVITE USER BY EMAIL ============
-  async inviteUserByEmail(email: string, metadata?: Record<string, any>) {
+  async inviteUserByEmail(email: string,emailRedirectTo:string, metadata?: Record<string, any>) {
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       email,
       {
         data: metadata,
-        redirectTo: `${process.env.FRONTEND_URL}/accept-invite`,
+        redirectTo: emailRedirectTo,
       },
     );
 
@@ -292,7 +292,7 @@ export class SupabaseAuthService {
   }
 
   // ============ ADMIN: GENERATE LINK (Magic Link, Recovery, etc.) ============
-  async generateLink(type: "signup" | "magiclink" | "recovery", email: string) {
+  async generateLink(type: "signup" | "magiclink" | "recovery", email: string,emailRedirectTo:string) {
     let params: any;
 
     if (type === "signup") {
@@ -300,7 +300,7 @@ export class SupabaseAuthService {
         type: "signup",
         email,
         options: {
-          redirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
+          redirectTo: emailRedirectTo,
         },
       };
     } else if (type === "magiclink") {
@@ -308,7 +308,7 @@ export class SupabaseAuthService {
         type: "magiclink",
         email,
         options: {
-          redirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
+          redirectTo: emailRedirectTo,
         },
       };
     } else if (type === "recovery") {
@@ -316,7 +316,7 @@ export class SupabaseAuthService {
         type: "recovery",
         email,
         options: {
-          redirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
+          redirectTo: emailRedirectTo,
         },
       };
     } else {

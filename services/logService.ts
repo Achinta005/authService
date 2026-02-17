@@ -467,6 +467,38 @@ export class LogService {
     return results;
   }
 
+  async getAllSecurityEvents() {
+    const collection = this.db.collection<SecurityEvent>("security_events");
+
+    const results = await collection
+      .aggregate([
+        {
+          $group: {
+            _id: "$severity",
+            count: { $sum: 1 },
+            events: {
+              $push: {
+                eventType: "$eventType",
+                userId: "$userId",
+                timestamp: "$timestamp",
+                description: "$description",
+                resolved: "$resolved",
+                resolvedAt: "$resolvedAt",
+              },
+            },
+          },
+        },
+        {
+          $sort: {
+            _id: 1,
+          },
+        },
+      ])
+      .toArray();
+
+    return results;
+  }
+
   // Security event trends
   async getSecurityEventTrends(days: number = 30) {
     const collection = this.db.collection<SecurityEvent>("security_events");

@@ -37,8 +37,4 @@ export const config = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW || "900000"),
     max: parseInt(process.env.RATE_LIMIT_MAX || "100"),
   },
-
-  frontend: {
-    url: process.env.FRONTEND_URL!,
-  },
 };

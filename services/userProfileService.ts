@@ -324,6 +324,7 @@ export class UserProfileService {
       .select([
         "COUNT(*) as total",
         'COUNT(*) FILTER (WHERE "isActive" = true) as active',
+        'COUNT(*) FILTER (WHERE "isActive" = false) as inactive',
         'COUNT(*) FILTER (WHERE "isEmailVerified" = true) as verified',
         'COUNT(*) FILTER (WHERE "isMfaEnabled" = true) as mfaEnabled',
       ])
