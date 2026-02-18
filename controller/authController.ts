@@ -2,7 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { SupabaseAuthService } from "../services/superbaseAuthService";
 import { UserProfileService } from "../services/userProfileService";
 import { RoleService } from "../services/roleService";
-import { LogService } from "../services/logService";
+import { AnalyticsService } from "../services/analyticsService";
+import { LoggerService } from "../lib/activityLogger";
 
 const CLIENT_REDIRECT_MAP: Record<string, string> = {
   admin: "https://appsy-ivory.vercel.app/verified",
@@ -14,10 +15,10 @@ export class AuthController {
     private supabaseAuth: SupabaseAuthService,
     private userProfileService: UserProfileService,
     private roleService: RoleService,
-    private logService: LogService,
+    private analyticService: AnalyticsService,
+    private loggerService: LoggerService,
   ) {}
 
-  // ============ REGISTER ============
   register = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const {
@@ -31,7 +32,6 @@ export class AuthController {
       } = req.body;
 
       if (!email || !password || !redirectTo || !projectName || !projectId) {
-        console.warn("❌ [REGISTER] Missing required fields");
         return res.status(400).json({
           success: false,
           message:
@@ -56,15 +56,16 @@ export class AuthController {
           );
 
         if (existingProfile) {
-          console.warn(
-            `⚠️ [REGISTER] User ${email} already registered for project ${projectName}`,
-          );
-          console.warn("⚠️ [REGISTER] Existing profile:", {
-            profileId: existingProfile.id,
-            email: existingProfile.email,
-            projectName: existingProfile.projectName,
-            projectId: existingProfile.projectId,
-            createdAt: existingProfile.createdAt,
+          await this.loggerService.createSecurityEvent({
+            userId,
+            eventType: "duplicate_registration_attempt",
+            severity: "low",
+            description: `User ${email} attempted to re-register for project ${projectName}`,
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            resolved: true,
+            metadata: { projectName, projectId },
+            timestamp: new Date(),
           });
 
           return res.status(409).json({
@@ -85,7 +86,17 @@ export class AuthController {
         );
 
         if (!user) {
-          console.error("[REGISTER] Supabase returned no user");
+          await this.loggerService.createSecurityEvent({
+            eventType: "registration_failed",
+            severity: "medium",
+            description: "Supabase signUp returned no user",
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            resolved: false,
+            metadata: { email, projectName, projectId },
+            timestamp: new Date(),
+          });
+
           return res.status(400).json({
             success: false,
             message: "Registration failed",
@@ -99,7 +110,7 @@ export class AuthController {
 
       const profile = await this.userProfileService.createProfile({
         id: userId,
-        email: email,
+        email,
         fullName,
         projectName,
         projectId,
@@ -114,22 +125,25 @@ export class AuthController {
           projectId,
           projectName,
         );
-      } else {
-        console.warn(` [REGISTER] Role not found for slug: ${role}`);
       }
 
-      await this.logService.createAuditLog({
-        userId: userId,
+      // ── Audit log ────────────────────────────────────────────────────────────
+      await this.loggerService.createAuditLog({
+        userId,
         action: isNewUser ? "user.registered" : "user.registered_new_project",
         resource: "user",
         resourceId: userId,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
+        changes: {
+          after: { email, fullName, projectName, projectId, role },
+        },
         metadata: { projectName, projectId },
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      // ── Activity log ─────────────────────────────────────────────────────────
+      await this.loggerService.createActivityLog({
         userId,
         eventType: isNewUser
           ? "user_registered"
@@ -152,7 +166,7 @@ export class AuthController {
         data: {
           user: {
             id: userId,
-            email: email,
+            email,
             fullName: profile.fullName,
             projectName,
           },
@@ -161,37 +175,38 @@ export class AuthController {
         },
       });
     } catch (error: any) {
-      console.error("❌ [REGISTER] Registration error:", error.message);
-      console.error("❌ [REGISTER] Error name:", error.name);
-      console.error("❌ [REGISTER] Error code:", error.code);
-      console.error("❌ [REGISTER] Stack trace:", error.stack);
-
-      // Log the full error object for debugging
-      console.error(
-        "❌ [REGISTER] Full error object:",
-        JSON.stringify(error, null, 2),
-      );
+      // ── Failure security event ────────────────────────────────────────────────
+      await this.loggerService.createSecurityEvent({
+        eventType: "registration_exception",
+        severity: "high",
+        description: `Unhandled error during registration: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          errorName: error.name,
+          errorCode: error.code,
+          errorMessage: error.message,
+        },
+        timestamp: new Date(),
+      });
 
       next(error);
     }
   };
 
-  // ============ LOGIN ============
   login = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password, projectName, projectId } = req.body;
 
-      // Authenticate via Supabase
       const { user, session } = await this.supabaseAuth.signInWithPassword(
         email,
         password,
       );
 
       if (!user || !session) {
-        console.warn("❌ Invalid credentials");
-
-        // Log failed login
-        await this.logService.createLoginLog({
+        // ── Failed login log ────────────────────────────────────────────────────
+        await this.loggerService.createLoginLog({
           userId: "",
           email,
           loginMethod: "email",
@@ -206,20 +221,22 @@ export class AuthController {
           createdAt: new Date(),
         });
 
-        await this.logService.createActivityLog({
-          userId: user.id,
-          eventType: "user_login",
+        // ── Failed activity log ─────────────────────────────────────────────────
+        await this.loggerService.createActivityLog({
+          userId: "",
+          eventType: "user_login_failed",
           eventCategory: "auth",
-          eventLabel: "Email Login",
+          eventLabel: "Email Login Failed",
           page: "/login",
-          sessionId: session.access_token,
+          sessionId: "",
           ipAddress: req.ip || "",
           userAgent: req.get("user-agent") || "",
           metadata: {
+            action: "login_failed",
             projectName,
             projectId,
             loginMethod: "email",
-            mfaUsed: null,
+            failureReason: "Invalid credentials",
             device: this.extractDevice(req.get("user-agent") || ""),
             browser: this.extractBrowser(req.get("user-agent") || ""),
             os: this.extractOS(req.get("user-agent") || ""),
@@ -227,12 +244,13 @@ export class AuthController {
           timestamp: new Date(),
         });
 
+        // ── Brute force detection ───────────────────────────────────────────────
         const failedAttempts =
-          await this.logService.getFailedLoginAttempts(3600000);
+          await this.analyticService.getFailedLoginAttempts(3600000);
         const userFailedAttempts = failedAttempts.find((f) => f._id === email);
 
         if (userFailedAttempts && userFailedAttempts.attempts >= 3) {
-          await this.logService.createSecurityEvent({
+          await this.loggerService.createSecurityEvent({
             userId: "",
             eventType: "brute_force_attempt",
             severity: userFailedAttempts.attempts >= 5 ? "high" : "medium",
@@ -248,36 +266,62 @@ export class AuthController {
             timestamp: new Date(),
           });
         }
+
+        return res.status(401).json({
+          success: false,
+          message: "Invalid credentials",
+        });
       }
 
-      // Get user profile
       const profile =
         await this.userProfileService.getProfileByIdandProjDetails(
           user.id,
           projectName,
           projectId,
         );
+
       if (!profile) {
-        console.warn(" Account Not Found");
+        await this.loggerService.createSecurityEvent({
+          userId: user.id,
+          eventType: "login_account_not_found",
+          severity: "medium",
+          description: `User ${email} authenticated but no profile found for project ${projectName}`,
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          resolved: true,
+          metadata: { projectName, projectId },
+          timestamp: new Date(),
+        });
+
         return res.status(403).json({
           success: false,
           message: "Account not Found",
         });
       }
-      // Check if account is active
+
       if (!profile.isActive) {
-        console.warn(" Account deactivated");
+        await this.loggerService.createSecurityEvent({
+          userId: user.id,
+          eventType: "login_deactivated_account",
+          severity: "medium",
+          description: `Login attempt on deactivated account for ${email}`,
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          resolved: true,
+          metadata: { projectName, projectId },
+          timestamp: new Date(),
+        });
+
         return res.status(403).json({
           success: false,
           message: "Account is deactivated",
         });
       }
 
-      // Update last login
       await this.userProfileService.updateLastLogin(user.id, req.ip || "");
 
-      // Log successful login
-      await this.logService.createLoginLog({
+      // ── Successful login log ──────────────────────────────────────────────────
+      await this.loggerService.createLoginLog({
         userId: user.id,
         email: user.email!,
         loginMethod: "email",
@@ -292,19 +336,53 @@ export class AuthController {
         createdAt: new Date(),
       });
 
-      // Set httpOnly cookies
+      // ── Successful activity log ───────────────────────────────────────────────
+      await this.loggerService.createActivityLog({
+        userId: user.id,
+        eventType: "user_login",
+        eventCategory: "auth",
+        eventLabel: "Email Login",
+        page: "/login",
+        sessionId: session.access_token,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: {
+          action: "login_success",
+          projectName,
+          projectId,
+          loginMethod: "email",
+          mfaUsed: profile.isMfaEnabled,
+          device: this.extractDevice(req.get("user-agent") || ""),
+          browser: this.extractBrowser(req.get("user-agent") || ""),
+          os: this.extractOS(req.get("user-agent") || ""),
+        },
+        timestamp: new Date(),
+      });
+
+      // ── Audit log ─────────────────────────────────────────────────────────────
+      await this.loggerService.createAuditLog({
+        userId: user.id,
+        action: "user.login",
+        resource: "user",
+        resourceId: user.id,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { projectName, projectId },
+        timestamp: new Date(),
+      });
+
       res.cookie("access_token", session.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 60 * 60 * 1000, // 1 hour
+        maxAge: 60 * 60 * 1000,
       });
 
       res.cookie("refresh_token", session.refresh_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
       res.json({
@@ -325,19 +403,27 @@ export class AuthController {
         },
       });
     } catch (error: any) {
-      console.error("❌ [AUTH MICROSERVICE] Login error:", error.message);
+      await this.loggerService.createSecurityEvent({
+        eventType: "login_exception",
+        severity: "high",
+        description: `Unhandled error during login: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { errorName: error.name, errorCode: error.code },
+        timestamp: new Date(),
+      });
+
       next(error);
     }
   };
 
-  // ============ REFRESH TOKEN ============
   refreshToken = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const refresh_token =
         req.cookies?.refresh_token || req.body.refresh_token;
 
       if (!refresh_token) {
-        console.warn("❌ No refresh token provided");
         return res.status(401).json({
           success: false,
           message: "No refresh token provided",
@@ -348,28 +434,23 @@ export class AuthController {
         await this.supabaseAuth.refreshSession(refresh_token);
 
       if (!session || !user) {
-        console.warn("❌ Invalid refresh token");
+        await this.loggerService.createSecurityEvent({
+          eventType: "token_refresh_failed",
+          severity: "medium",
+          description: "Invalid or expired refresh token used",
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          resolved: true,
+          metadata: { action: "token_refresh_failed" },
+          timestamp: new Date(),
+        });
+
         return res.status(401).json({
           success: false,
           message: "Invalid refresh token",
         });
       }
 
-      await this.logService.createLoginLog({
-        userId: user.id,
-        email: user.email!,
-        loginMethod: "email",
-        success: true,
-        ipAddress: req.ip || "",
-        userAgent: req.get("user-agent") || "",
-        device: this.extractDevice(req.get("user-agent") || ""),
-        browser: this.extractBrowser(req.get("user-agent") || ""),
-        os: this.extractOS(req.get("user-agent") || ""),
-        mfaUsed: false,
-        sessionId: session.access_token,
-        createdAt: new Date(),
-      });
-      // Update cookies
       res.cookie("access_token", session.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -384,40 +465,41 @@ export class AuthController {
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
-      // ✅ Fixed: Return consistent structure
       res.json({
         success: true,
-        accessToken: session.access_token, // Changed from data.accessToken
+        accessToken: session.access_token,
         refreshToken: session.refresh_token,
         expiresIn: 3600,
-        user: {
-          id: user.id,
-          email: user.email,
-        },
-        session: session, // Keep for backward compatibility
+        user: { id: user.id, email: user.email },
+        session,
       });
     } catch (error: any) {
-      console.error("❌ [AUTH MICROSERVICE] Refresh error:", error.message);
+      await this.loggerService.createSecurityEvent({
+        eventType: "token_refresh_exception",
+        severity: "high",
+        description: `Unhandled error during token refresh: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { action: "token_refresh_exception", errorName: error.name },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
 
-  // ============ LOGOUT ============
   logout = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const accessToken =
         req.cookies?.access_token ||
         req.headers.authorization?.replace("Bearer ", "");
 
-      if (!accessToken) {
-        console.warn("⚠️ No access token for logout");
-      } else {
+      if (accessToken) {
         const user = await this.supabaseAuth.getUserFromToken(accessToken);
-
         await this.supabaseAuth.logout(accessToken);
 
         if (user) {
-          await this.logService.createAuditLog({
+          await this.loggerService.createAuditLog({
             userId: user.id,
             action: "user.logout",
             resource: "session",
@@ -426,7 +508,8 @@ export class AuthController {
             userAgent: req.get("user-agent") || "",
             timestamp: new Date(),
           });
-          await this.logService.createActivityLog({
+
+          await this.loggerService.createActivityLog({
             userId: user.id,
             eventType: "user_logout",
             eventCategory: "auth",
@@ -435,27 +518,31 @@ export class AuthController {
             sessionId: accessToken,
             ipAddress: req.ip || "",
             userAgent: req.get("user-agent") || "",
-            metadata: { manual: true },
+            metadata: { action: "logout", manual: true },
             timestamp: new Date(),
           });
         }
       }
 
-      // Clear cookies
       res.clearCookie("access_token");
       res.clearCookie("refresh_token");
 
-      res.json({
-        success: true,
-        message: "Logout successful",
+      res.json({ success: true, message: "Logout successful" });
+    } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "logout_exception",
+        severity: "medium",
+        description: `Unhandled error during logout: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { action: "logout_exception", errorName: error.name },
+        timestamp: new Date(),
       });
-    } catch (err) {
-      console.error("❌ Logout error:", err);
-      next(err);
+      next(error);
     }
   };
 
-  // ============ VERIFY TOKEN (for Main Server) ============
   verifyToken = async (req: Request, res: Response) => {
     try {
       const token =
@@ -484,8 +571,6 @@ export class AuthController {
     }
   };
 
-  // ============ OAUTH LOGIN ============
-  // auth.controller.ts in auth microservice
   oauthLogin = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { provider } = req.params;
@@ -501,27 +586,48 @@ export class AuthController {
         return res.status(400).json({ message: "Client URL required" });
       }
 
-      // Ensure client URL has protocol
       const clientUrl = client.startsWith("http")
         ? client
         : `https://${client}`;
       const redirectTo = `${clientUrl}/verified`;
 
-      console.log(`[OAUTH] Redirecting to ${redirectTo} Provider: ${provider}`);
       const { url } = await this.supabaseAuth.signInWithOAuth(
         provider as any,
         redirectTo,
       );
 
-      // Return URL as JSON for proxy to consume
+      await this.loggerService.createActivityLog({
+        userId: "",
+        eventType: "oauth_login_initiated",
+        eventCategory: "auth",
+        eventLabel: "OAuth Login Initiated",
+        page: "/oauth",
+        sessionId: "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { action: "oauth_login_initiated", provider, clientUrl },
+        timestamp: new Date(),
+      });
+
       return res.status(200).json({ url });
-    } catch (err) {
-      console.error("❌ OAuth Login Error:", err);
-      next(err);
+    } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "oauth_login_exception",
+        severity: "high",
+        description: `OAuth login error: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "oauth_login_exception",
+          provider: req.params.provider,
+        },
+        timestamp: new Date(),
+      });
+      next(error);
     }
   };
 
-  // auth.controller.ts
   oauthCallback = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { access_token, refresh_token } = req.body;
@@ -531,36 +637,38 @@ export class AuthController {
       };
 
       if (!access_token || !refresh_token) {
-        console.error("❌ [OAUTH_CALLBACK] Missing tokens");
-        return res.status(400).json({
-          success: false,
-          message: "Missing tokens",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Missing tokens" });
       }
 
       if (!projectName || !projectId) {
-        console.error("❌ [OAUTH_CALLBACK] Missing project details");
-        return res.status(400).json({
-          success: false,
-          message: "Project details required",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Project details required" });
       }
 
-      const startTime = Date.now();
-
-      // Get user from Supabase using access token
       const user = await this.supabaseAuth.getUserFromToken(access_token);
 
-      const verifyDuration = Date.now() - startTime;
-
       if (!user) {
-        console.error(
-          "❌ [OAUTH_CALLBACK] Invalid token - Supabase returned no user",
-        );
-        return res.status(401).json({
-          success: false,
-          message: "Invalid authentication token",
+        await this.loggerService.createSecurityEvent({
+          eventType: "oauth_callback_invalid_token",
+          severity: "high",
+          description: "OAuth callback received invalid access token",
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          resolved: false,
+          metadata: {
+            action: "oauth_callback_invalid_token",
+            projectName,
+            projectId,
+          },
+          timestamp: new Date(),
         });
+
+        return res
+          .status(401)
+          .json({ success: false, message: "Invalid authentication token" });
       }
 
       const userId = user.id;
@@ -569,10 +677,8 @@ export class AuthController {
         user.user_metadata?.full_name || user.user_metadata?.name || "";
       const avatarUrl =
         user.user_metadata?.avatar_url || user.user_metadata?.picture || "";
+      const provider = user.app_metadata?.provider;
 
-      const profileCheckStart = Date.now();
-
-      // Check if profile exists for this project
       const existingProfile =
         await this.userProfileService.getProfileByIdandProjDetails(
           userId,
@@ -580,14 +686,29 @@ export class AuthController {
           parseInt(projectId as string),
         );
 
-      const profileCheckDuration = Date.now() - profileCheckStart;
-
       let profile;
       let isNewProfile = false;
 
       if (existingProfile) {
         profile = existingProfile;
-        await this.logService.createActivityLog({
+
+        await this.loggerService.createLoginLog({
+          userId,
+          email,
+          loginMethod: "oauth",
+          provider,
+          success: true,
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          device: this.extractDevice(req.get("user-agent") || ""),
+          browser: this.extractBrowser(req.get("user-agent") || ""),
+          os: this.extractOS(req.get("user-agent") || ""),
+          mfaUsed: false,
+          sessionId: access_token,
+          createdAt: new Date(),
+        });
+
+        await this.loggerService.createActivityLog({
           userId,
           eventType: "oauth_login",
           eventCategory: "auth",
@@ -596,7 +717,8 @@ export class AuthController {
           ipAddress: req.ip || "",
           userAgent: req.get("user-agent") || "",
           metadata: {
-            provider: user.app_metadata?.provider,
+            action: "oauth_login",
+            provider,
             projectName,
             projectId,
             isNewProfile: false,
@@ -604,64 +726,59 @@ export class AuthController {
           timestamp: new Date(),
         });
       } else {
-        const createProfileStart = Date.now();
-
         try {
-          // Create profile
           profile = await this.userProfileService.createProfile({
             id: userId,
-            email: email,
+            email,
             fullName,
             projectName: projectName as string,
             projectId: parseInt(projectId as string),
           });
 
-          const createProfileDuration = Date.now() - createProfileStart;
-
           isNewProfile = true;
 
-          // Assign default role
-          const roleStart = Date.now();
-
           const defaultRole = await this.roleService.getRoleBySlug("user");
-          const roleDuration = Date.now() - roleStart;
 
           if (defaultRole) {
-            const assignRoleStart = Date.now();
-
             await this.roleService.assignRoleToUser(
               userId,
               defaultRole.id,
               parseInt(projectId as string),
               projectName as string,
             );
-
-            const assignRoleDuration = Date.now() - assignRoleStart;
-          } else {
-            console.warn(
-              '⚠️  [OAUTH_CALLBACK] Default role "user" not found in database',
-            );
           }
 
-          // Create audit log
-          const auditStart = Date.now();
+          await this.loggerService.createLoginLog({
+            userId,
+            email,
+            loginMethod: "oauth",
+            provider,
+            success: true,
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            device: this.extractDevice(req.get("user-agent") || ""),
+            browser: this.extractBrowser(req.get("user-agent") || ""),
+            os: this.extractOS(req.get("user-agent") || ""),
+            mfaUsed: false,
+            sessionId: access_token,
+            createdAt: new Date(),
+          });
 
-          await this.logService.createAuditLog({
-            userId: userId,
+          await this.loggerService.createAuditLog({
+            userId,
             action: "user.oauth_registered",
             resource: "user",
             resourceId: userId,
             ipAddress: req.ip || "",
             userAgent: req.get("user-agent") || "",
-            metadata: {
-              projectName,
-              projectId,
-              provider: user.app_metadata?.provider,
+            changes: {
+              after: { email, fullName, projectName, projectId, provider },
             },
+            metadata: { projectName, projectId, provider },
             timestamp: new Date(),
           });
 
-          await this.logService.createActivityLog({
+          await this.loggerService.createActivityLog({
             userId,
             eventType: "oauth_registered",
             eventCategory: "auth",
@@ -670,26 +787,34 @@ export class AuthController {
             ipAddress: req.ip || "",
             userAgent: req.get("user-agent") || "",
             metadata: {
-              provider: user.app_metadata?.provider,
+              action: "oauth_registered",
+              provider,
               projectName,
               projectId,
               isNewProfile: true,
             },
             timestamp: new Date(),
           });
-
-          const auditDuration = Date.now() - auditStart;
         } catch (profileError: any) {
-          console.error("❌ [OAUTH_CALLBACK] Profile creation failed:", {
-            errorMessage: profileError.message,
-            errorCode: profileError.code,
-            errorName: profileError.name,
+          await this.loggerService.createSecurityEvent({
+            userId,
+            eventType: "oauth_profile_creation_failed",
+            severity: "high",
+            description: `OAuth profile creation failed: ${profileError.message}`,
+            ipAddress: req.ip || "",
+            userAgent: req.get("user-agent") || "",
+            resolved: false,
+            metadata: {
+              action: "oauth_profile_creation_failed",
+              provider,
+              projectName,
+              projectId,
+            },
+            timestamp: new Date(),
           });
           throw profileError;
         }
       }
-
-      const totalDuration = Date.now() - startTime;
 
       res.status(200).json({
         success: true,
@@ -699,7 +824,7 @@ export class AuthController {
         data: {
           user: {
             id: userId,
-            email: email,
+            email,
             fullName: profile.fullName,
             avatarUrl: profile.avatarUrl,
             projectName: profile.projectName,
@@ -708,28 +833,28 @@ export class AuthController {
         },
       });
     } catch (error: any) {
-      console.error(" [OAUTH_CALLBACK] FATAL ERROR");
-      console.error(" [OAUTH_CALLBACK] Error message:", error.message);
-
-      if (error.response) {
-        console.error(
-          " [OAUTH_CALLBACK] Error response data:",
-          error.response.data,
-        );
-      }
-
-      console.error("=".repeat(60));
+      await this.loggerService.createSecurityEvent({
+        eventType: "oauth_callback_exception",
+        severity: "critical",
+        description: `Unhandled OAuth callback error: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { action: "oauth_callback_exception", errorName: error.name },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
 
-  // ============ MAGIC LINK ============
   sendMagicLink = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email } = req.body;
       const redirectTo = CLIENT_REDIRECT_MAP[req.body.client];
+
       await this.supabaseAuth.signInWithMagicLink(email, redirectTo);
-      await this.logService.createAuditLog({
+
+      await this.loggerService.createAuditLog({
         userId: "",
         action: "magic_link.sent",
         resource: "auth",
@@ -738,7 +863,8 @@ export class AuthController {
         metadata: { email },
         timestamp: new Date(),
       });
-      await this.logService.createActivityLog({
+
+      await this.loggerService.createActivityLog({
         userId: "",
         eventType: "magic_link_requested",
         eventCategory: "auth",
@@ -747,26 +873,33 @@ export class AuthController {
         sessionId: "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { email },
+        metadata: { action: "magic_link_requested", email },
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "Magic link sent to your email",
-      });
+      res.json({ success: true, message: "Magic link sent to your email" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "magic_link_exception",
+        severity: "medium",
+        description: `Magic link send failed: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { action: "magic_link_exception", email: req.body.email },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
 
-  // ============ FORGOT PASSWORD ============
   forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, redirectUrl } = req.body;
 
       await this.supabaseAuth.sendPasswordResetEmail(email, redirectUrl);
-      await this.logService.createAuditLog({
+
+      await this.loggerService.createAuditLog({
         userId: "",
         action: "password.reset_requested",
         resource: "auth",
@@ -776,17 +909,18 @@ export class AuthController {
         timestamp: new Date(),
       });
 
-      await this.logService.createSecurityEvent({
+      await this.loggerService.createSecurityEvent({
         eventType: "password_reset_requested",
         severity: "low",
         description: `Password reset requested for ${email}`,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         resolved: true,
-        metadata: { email },
+        metadata: { action: "password_reset_requested", email },
         timestamp: new Date(),
       });
-      await this.logService.createActivityLog({
+
+      await this.loggerService.createActivityLog({
         userId: "",
         eventType: "forgot_password_requested",
         eventCategory: "auth",
@@ -795,19 +929,29 @@ export class AuthController {
         sessionId: "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { email },
+        metadata: { action: "forgot_password_requested", email },
         timestamp: new Date(),
       });
-      res.json({
-        success: true,
-        message: "Password reset email sent",
-      });
+
+      res.json({ success: true, message: "Password reset email sent" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "forgot_password_exception",
+        severity: "medium",
+        description: `Forgot password error: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "forgot_password_exception",
+          email: req.body.email,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
 
-  // ============ RESET PASSWORD ============
   resetPassword = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { token, newPassword } = req.body;
@@ -815,7 +959,7 @@ export class AuthController {
 
       await this.supabaseAuth.updatePassword(user.id, newPassword);
 
-      await this.logService.createAuditLog({
+      await this.loggerService.createAuditLog({
         userId: user.id,
         action: "password.reset",
         resource: "user",
@@ -825,7 +969,7 @@ export class AuthController {
         timestamp: new Date(),
       });
 
-      await this.logService.createSecurityEvent({
+      await this.loggerService.createSecurityEvent({
         userId: user.id,
         eventType: "password_changed",
         severity: "medium",
@@ -833,11 +977,14 @@ export class AuthController {
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         resolved: true,
-        metadata: { resetMethod: "email_link" },
+        metadata: {
+          action: "password_reset_completed",
+          resetMethod: "email_link",
+        },
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: user.id,
         eventType: "password_reset_completed",
         eventCategory: "auth",
@@ -846,30 +993,40 @@ export class AuthController {
         sessionId: "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { resetMethod: "email_link" },
+        metadata: {
+          action: "password_reset_completed",
+          resetMethod: "email_link",
+        },
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "Password reset successful",
-      });
+      res.json({ success: true, message: "Password reset successful" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "password_reset_exception",
+        severity: "high",
+        description: `Password reset error: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { action: "password_reset_exception", errorName: error.name },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
 
-  // ============ RESEND VERIFICATION EMAIL ============
   resendVerification = async (
     req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      const { email,redirectTo } = req.body;
+      const { email, redirectTo } = req.body;
 
-      await this.supabaseAuth.resendVerificationEmail(email,redirectTo);
-      await this.logService.createAuditLog({
+      await this.supabaseAuth.resendVerificationEmail(email, redirectTo);
+
+      await this.loggerService.createAuditLog({
         userId: "",
         action: "verification.resent",
         resource: "auth",
@@ -878,7 +1035,8 @@ export class AuthController {
         metadata: { email },
         timestamp: new Date(),
       });
-      await this.logService.createActivityLog({
+
+      await this.loggerService.createActivityLog({
         userId: "",
         eventType: "verification_email_resent",
         eventCategory: "auth",
@@ -887,19 +1045,29 @@ export class AuthController {
         sessionId: "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { email },
+        metadata: { action: "verification_email_resent", email },
         timestamp: new Date(),
       });
-      res.json({
-        success: true,
-        message: "Verification email sent",
-      });
+
+      res.json({ success: true, message: "Verification email sent" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "resend_verification_exception",
+        severity: "medium",
+        description: `Resend verification error: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "resend_verification_exception",
+          email: req.body.email,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
 
-  // Helper methods
   private extractDevice(userAgent: string): string {
     if (/mobile/i.test(userAgent)) return "mobile";
     if (/tablet/i.test(userAgent)) return "tablet";

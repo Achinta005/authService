@@ -7,10 +7,10 @@ import { validateRequest } from "../middlewares/validateRequest";
 import { SupabaseAuthService } from "../services/superbaseAuthService";
 import { UserProfileService } from "../services/userProfileService";
 import { RoleService } from "../services/roleService";
-import { LogService } from "../services/logService";
 import { AnalyticsService } from "../services/analyticsService";
 import { ApiKeyService } from "../services/apiKeyService";
 import { ApiKeyMiddleware } from "../middlewares/apiKeyMiddleware";
+import { LoggerService } from "../lib/activityLogger";
 
 const router = Router();
 const apiKeyMiddleware = new ApiKeyMiddleware();
@@ -18,17 +18,15 @@ const adminController = new AdminController(
   new SupabaseAuthService(),
   new UserProfileService(),
   new RoleService(),
-  new LogService(),
+  new LoggerService(),
   new AnalyticsService(),
   new ApiKeyService(),
 );
 
-// All admin routes require authentication and admin role
-router.use(authenticate);
-
 // ============ USER MANAGEMENT ============
 router.get(
   "/users",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("users.read"),
   hasRole("admin"),
@@ -37,6 +35,7 @@ router.get(
 
 router.get(
   "/users/:userId",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("users.read"),
   hasRole("admin"),
@@ -46,6 +45,7 @@ router.get(
 //This endpoint is for changing user profile info(Not usefull)
 router.put(
   "/users/:userId",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("users.update"),
   hasRole("admin"),
@@ -54,6 +54,7 @@ router.put(
 
 router.post(
   "/users/:userId/deactivate",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("users.manage"),
   hasRole("admin"),
@@ -62,6 +63,7 @@ router.post(
 
 router.post(
   "/users/:userId/activate",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("users.manage"),
   hasRole("admin"),
@@ -70,6 +72,7 @@ router.post(
 
 router.delete(
   "/users/:userId",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("users.delete"),
   hasRole("admin"),
@@ -79,6 +82,7 @@ router.delete(
 // ============ ROLE ASSIGNMENT ============
 router.post(
   "/users/:userId/roles",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("users.manage"),
   [body("roleId").isInt().withMessage("Role ID must be an integer")],
@@ -98,6 +102,7 @@ router.delete(
 // ============ ROLE MANAGEMENT ============
 router.get(
   "/roles",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("roles.read"),
   hasRole("admin"),
@@ -106,6 +111,7 @@ router.get(
 
 router.post(
   "/roles",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("roles.manage"),
   [
@@ -119,6 +125,7 @@ router.post(
 
 router.put(
   "/roles/:roleId",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("roles.manage"),
   hasRole("admin"),
@@ -127,6 +134,7 @@ router.put(
 
 router.delete(
   "/roles/:roleId",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("roles.manage"),
   hasRole("admin"),
@@ -136,6 +144,7 @@ router.delete(
 // ============ PERMISSION MANAGEMENT ============
 router.get(
   "/permissions",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("roles.read"),
   hasRole("admin"),
@@ -144,6 +153,7 @@ router.get(
 
 router.post(
   "/permissions",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("create.permission"),
   hasRole("admin"),
@@ -152,6 +162,7 @@ router.post(
 
 router.post(
   "/roles/:roleId/permissions",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("roles.manage"),
   hasRole("admin"),
@@ -167,6 +178,7 @@ router.post(
 // ============ ANALYTICS ============
 router.get(
   "/analytics/dashboard",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasRole("admin"),
   hasPermission("analytics.view"),
@@ -175,6 +187,7 @@ router.get(
 
 router.get(
   "/analytics/user-statistics",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasRole("admin"),
   hasPermission("analytics.view"),
@@ -183,6 +196,7 @@ router.get(
 
 router.get(
   "/analytics/user-growth",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasRole("admin"),
   hasPermission("analytics.view"),
@@ -191,6 +205,7 @@ router.get(
 
 router.get(
   "/analytics/login-analytics",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasRole("admin"),
   hasPermission("analytics.view"),
@@ -199,6 +214,7 @@ router.get(
 
 router.get(
   "/analytics/security-events",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasRole("admin"),
   hasPermission("analytics.view"),
@@ -207,6 +223,7 @@ router.get(
 
 router.get(
   "/analytics/suspicious-ips",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasRole("admin"),
   hasPermission("analytics.view"),
@@ -216,6 +233,7 @@ router.get(
 // ============ API KEY Management ============
 router.get(
   "/api/keys",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("api.key.manage"),
   hasRole("admin"),
@@ -223,13 +241,8 @@ router.get(
 );
 
 router.post(
-  "/api/valid",
-  apiKeyMiddleware.requirePermission("admin"),
-  adminController.validateKey,
-);
-
-router.post(
   "/api/keys/:serviceId",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("api.key.manage"),
   hasRole("admin"),
@@ -238,6 +251,7 @@ router.post(
 
 router.delete(
   "/api/keys/:serviceId/:keyId",
+  authenticate,
   apiKeyMiddleware.requirePermission("admin"),
   hasPermission("api.key.manage"),
   hasRole("admin"),

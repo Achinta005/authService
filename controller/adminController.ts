@@ -2,16 +2,16 @@ import { Request, Response, NextFunction } from "express";
 import { SupabaseAuthService } from "../services/superbaseAuthService";
 import { UserProfileService } from "../services/userProfileService";
 import { RoleService } from "../services/roleService";
-import { LogService } from "../services/logService";
 import { AnalyticsService } from "../services/analyticsService";
 import { ApiKeyService } from "../services/apiKeyService";
+import { LoggerService } from "../lib/activityLogger";
 
 export class AdminController {
   constructor(
     private supabaseAuth: SupabaseAuthService,
     private userProfileService: UserProfileService,
     private roleService: RoleService,
-    private logService: LogService,
+    private loggerService: LoggerService,
     private analyticsService: AnalyticsService,
     private apiKeyService: ApiKeyService,
   ) {
@@ -40,10 +40,7 @@ export class AdminController {
         filters,
       );
 
-      res.json({
-        success: true,
-        data: result,
-      });
+      res.json({ success: true, data: result });
     } catch (error: any) {
       next(error);
     }
@@ -52,15 +49,10 @@ export class AdminController {
   getUserById = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { userId } = req.params;
-
       const profile = await this.userProfileService.getProfileById(
         userId as string,
       );
-
-      res.json({
-        success: true,
-        data: profile,
-      });
+      res.json({ success: true, data: profile });
     } catch (error: any) {
       next(error);
     }
@@ -71,28 +63,26 @@ export class AdminController {
       const { userId } = req.params;
       const adminId = (req as any).user.id;
       const updates = req.body;
+      const resolvedId = Array.isArray(userId) ? userId[0] : userId;
 
       const profile = await this.userProfileService.updateProfile(
-        userId as string,
+        resolvedId,
         updates,
       );
 
-      // Log audit event
-      await this.logService.createAuditLog({
-        userId: Array.isArray(userId) ? userId[0] : userId,
+      await this.loggerService.createAuditLog({
+        userId: resolvedId,
         action: "user.updated_by_admin",
         resource: "user",
-        resourceId: Array.isArray(userId) ? userId[0] : userId,
+        resourceId: resolvedId,
         performedBy: adminId,
-        changes: {
-          after: updates,
-        },
+        changes: { after: updates },
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_user_updated",
         eventCategory: "admin",
@@ -101,7 +91,11 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { targetUserId: userId, updatedFields: Object.keys(updates) },
+        metadata: {
+          action: "admin_user_updated",
+          targetUserId: resolvedId,
+          updatedFields: Object.keys(updates),
+        },
         timestamp: new Date(),
       });
 
@@ -111,6 +105,19 @@ export class AdminController {
         data: profile,
       });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_user_update_exception",
+        severity: "medium",
+        description: `Error updating user: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_user_update_exception",
+          targetUserId: req.params.userId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -119,24 +126,37 @@ export class AdminController {
     try {
       const { userId } = req.params;
       const adminId = (req as any).user.id;
+      const resolvedId = Array.isArray(userId) ? userId[0] : userId;
 
-      await this.userProfileService.deactivateUser(
-        Array.isArray(userId) ? userId[0] : userId,
-      );
+      await this.userProfileService.deactivateUser(resolvedId);
 
-      // Log audit event
-      await this.logService.createAuditLog({
-        userId: Array.isArray(userId) ? userId[0] : userId,
+      await this.loggerService.createAuditLog({
+        userId: resolvedId,
         action: "user.deactivated",
         resource: "user",
-        resourceId: Array.isArray(userId) ? userId[0] : userId,
+        resourceId: resolvedId,
         performedBy: adminId,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createSecurityEvent({
+        userId: resolvedId,
+        eventType: "user_deactivated_by_admin",
+        severity: "medium",
+        description: `User account deactivated by admin`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: {
+          action: "user_deactivated_by_admin",
+          deactivatedBy: adminId,
+        },
+        timestamp: new Date(),
+      });
+
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_user_deactivated",
         eventCategory: "admin",
@@ -145,15 +165,28 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { targetUserId: userId },
+        metadata: {
+          action: "admin_user_deactivated",
+          targetUserId: resolvedId,
+        },
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "User deactivated successfully",
-      });
+      res.json({ success: true, message: "User deactivated successfully" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_user_deactivate_exception",
+        severity: "medium",
+        description: `Error deactivating user: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_user_deactivate_exception",
+          targetUserId: req.params.userId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -162,24 +195,22 @@ export class AdminController {
     try {
       const { userId } = req.params;
       const adminId = (req as any).user.id;
+      const resolvedId = Array.isArray(userId) ? userId[0] : userId;
 
-      await this.userProfileService.activateUser(
-        Array.isArray(userId) ? userId[0] : userId,
-      );
+      await this.userProfileService.activateUser(resolvedId);
 
-      // Log audit event
-      await this.logService.createAuditLog({
-        userId: Array.isArray(userId) ? userId[0] : userId,
+      await this.loggerService.createAuditLog({
+        userId: resolvedId,
         action: "user.activated",
         resource: "user",
-        resourceId: Array.isArray(userId) ? userId[0] : userId,
+        resourceId: resolvedId,
         performedBy: adminId,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_user_activated",
         eventCategory: "admin",
@@ -188,15 +219,25 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { targetUserId: userId },
+        metadata: { action: "admin_user_activated", targetUserId: resolvedId },
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "User activated successfully",
-      });
+      res.json({ success: true, message: "User activated successfully" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_user_activate_exception",
+        severity: "medium",
+        description: `Error activating user: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_user_activate_exception",
+          targetUserId: req.params.userId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -205,34 +246,33 @@ export class AdminController {
     try {
       const { userId } = req.params;
       const adminId = (req as any).user.id;
+      const resolvedId = Array.isArray(userId) ? userId[0] : userId;
 
-      const userProfile = await this.userProfileService.getProfileById(
-        Array.isArray(userId) ? userId[0] : userId,
-      );
+      const userProfile =
+        await this.userProfileService.getProfileById(resolvedId);
 
-      // Delete from Supabase
-      await this.supabaseAuth.deleteUser(
-        Array.isArray(userId) ? userId[0] : userId,
-      );
+      await this.supabaseAuth.deleteUser(resolvedId);
+      await this.userProfileService.deleteProfile(resolvedId);
 
-      // Delete profile
-      await this.userProfileService.deleteProfile(
-        Array.isArray(userId) ? userId[0] : userId,
-      );
-
-      await this.logService.createAuditLog({
-        userId: Array.isArray(userId) ? userId[0] : userId,
+      await this.loggerService.createAuditLog({
+        userId: resolvedId,
         action: "user.deleted",
         resource: "user",
-        resourceId: Array.isArray(userId) ? userId[0] : userId,
+        resourceId: resolvedId,
         performedBy: adminId,
+        changes: {
+          before: {
+            email: userProfile?.email,
+            fullName: userProfile?.fullName,
+          },
+        },
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         timestamp: new Date(),
       });
 
-      await this.logService.createSecurityEvent({
-        userId: Array.isArray(userId) ? userId[0] : userId,
+      await this.loggerService.createSecurityEvent({
+        userId: resolvedId,
         eventType: "user_deleted_by_admin",
         severity: "high",
         description: `User account "${userProfile?.email}" was deleted by admin`,
@@ -240,6 +280,7 @@ export class AdminController {
         userAgent: req.get("user-agent") || "",
         resolved: true,
         metadata: {
+          action: "user_deleted_by_admin",
           deletedBy: adminId,
           deletedUserEmail: userProfile?.email,
           deletedUserName: userProfile?.fullName,
@@ -247,7 +288,7 @@ export class AdminController {
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_user_deleted",
         eventCategory: "admin",
@@ -257,18 +298,29 @@ export class AdminController {
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         metadata: {
-          targetUserId: userId,
+          action: "admin_user_deleted",
+          targetUserId: resolvedId,
           deletedEmail: userProfile?.email,
           deletedName: userProfile?.fullName,
         },
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "User deleted successfully",
-      });
+      res.json({ success: true, message: "User deleted successfully" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_user_delete_exception",
+        severity: "high",
+        description: `Error deleting user: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_user_delete_exception",
+          targetUserId: req.params.userId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -279,21 +331,21 @@ export class AdminController {
       const { userId } = req.params;
       const { roleId, projectName, projectId } = req.body;
       const adminId = (req as any).user.id;
+      const resolvedId = Array.isArray(userId) ? userId[0] : userId;
 
       await this.roleService.assignRoleToUser(
-        Array.isArray(userId) ? userId[0] : userId,
+        resolvedId,
         roleId,
         projectId,
         projectName,
         adminId,
       );
 
-      // Log audit event
-      await this.logService.createAuditLog({
-        userId: Array.isArray(userId) ? userId[0] : userId,
+      await this.loggerService.createAuditLog({
+        userId: resolvedId,
         action: "role.assigned",
         resource: "user_role",
-        resourceId: Array.isArray(userId) ? userId[0] : userId,
+        resourceId: resolvedId,
         performedBy: adminId,
         metadata: { roleId },
         ipAddress: req.ip || "",
@@ -301,7 +353,7 @@ export class AdminController {
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_role_assigned",
         eventCategory: "admin",
@@ -310,15 +362,31 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { targetUserId: userId, roleId, projectName, projectId },
+        metadata: {
+          action: "admin_role_assigned",
+          targetUserId: resolvedId,
+          roleId,
+          projectName,
+          projectId,
+        },
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "Role assigned successfully",
-      });
+      res.json({ success: true, message: "Role assigned successfully" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_role_assign_exception",
+        severity: "medium",
+        description: `Error assigning role: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_role_assign_exception",
+          targetUserId: req.params.userId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -327,18 +395,18 @@ export class AdminController {
     try {
       const { userId, roleId } = req.params;
       const adminId = (req as any).user.id;
-
-      await this.roleService.removeRoleFromUser(
-        Array.isArray(userId) ? userId[0] : userId,
-        parseInt(Array.isArray(roleId) ? roleId[0] : roleId),
+      const resolvedUserId = Array.isArray(userId) ? userId[0] : userId;
+      const resolvedRoleId = parseInt(
+        Array.isArray(roleId) ? roleId[0] : roleId,
       );
 
-      // Log audit event
-      await this.logService.createAuditLog({
-        userId: Array.isArray(userId) ? userId[0] : userId,
+      await this.roleService.removeRoleFromUser(resolvedUserId, resolvedRoleId);
+
+      await this.loggerService.createAuditLog({
+        userId: resolvedUserId,
         action: "role.removed",
         resource: "user_role",
-        resourceId: Array.isArray(userId) ? userId[0] : userId,
+        resourceId: resolvedUserId,
         performedBy: adminId,
         metadata: { roleId },
         ipAddress: req.ip || "",
@@ -346,7 +414,7 @@ export class AdminController {
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_role_removed",
         eventCategory: "admin",
@@ -355,15 +423,29 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { targetUserId: userId, roleId },
+        metadata: {
+          action: "admin_role_removed",
+          targetUserId: resolvedUserId,
+          roleId,
+        },
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "Role removed successfully",
-      });
+      res.json({ success: true, message: "Role removed successfully" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_role_remove_exception",
+        severity: "medium",
+        description: `Error removing role: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_role_remove_exception",
+          targetUserId: req.params.userId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -384,11 +466,7 @@ export class AdminController {
         startDate,
         endDate,
       );
-
-      res.json({
-        success: true,
-        data: metrics,
-      });
+      res.json({ success: true, data: metrics });
     } catch (error: any) {
       next(error);
     }
@@ -401,11 +479,7 @@ export class AdminController {
   ) => {
     try {
       const stats = await this.userProfileService.getUserStatistics();
-
-      res.json({
-        success: true,
-        data: stats,
-      });
+      res.json({ success: true, data: stats });
     } catch (error: any) {
       next(error);
     }
@@ -414,13 +488,8 @@ export class AdminController {
   getUserGrowth = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const days = parseInt(req.query.days as string) || 30;
-
       const growth = await this.userProfileService.getUserGrowth(days);
-
-      res.json({
-        success: true,
-        data: growth,
-      });
+      res.json({ success: true, data: growth });
     } catch (error: any) {
       next(error);
     }
@@ -437,14 +506,11 @@ export class AdminController {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
 
-      const analytics = await this.logService.getLoginAnalyticsByMethod(
+      const analytics = await this.analyticsService.getLoginAnalyticsByMethod(
         startDate,
         endDate,
       );
-      res.json({
-        success: true,
-        data: analytics,
-      });
+      res.json({ success: true, data: analytics });
     } catch (error: any) {
       next(error);
     }
@@ -456,12 +522,8 @@ export class AdminController {
     next: NextFunction,
   ) => {
     try {
-      const events = await this.logService.getAllSecurityEvents();
-
-      res.json({
-        success: true,
-        data: events,
-      });
+      const events = await this.analyticsService.getAllSecurityEvents();
+      res.json({ success: true, data: events });
     } catch (error: any) {
       next(error);
     }
@@ -475,13 +537,11 @@ export class AdminController {
     try {
       const threshold = parseInt(req.query.threshold as string) || 5;
       const timeWindow = parseInt(req.query.timeWindow as string) || 3600000;
-
-      const ips = await this.logService.getSuspiciousIPs(threshold, timeWindow);
-
-      res.json({
-        success: true,
-        data: ips,
-      });
+      const ips = await this.analyticsService.getSuspiciousIPs(
+        threshold,
+        timeWindow,
+      );
+      res.json({ success: true, data: ips });
     } catch (error: any) {
       next(error);
     }
@@ -491,11 +551,7 @@ export class AdminController {
   getAllRoles = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const roles = await this.roleService.getAllRoles();
-
-      res.json({
-        success: true,
-        data: roles,
-      });
+      res.json({ success: true, data: roles });
     } catch (error: any) {
       next(error);
     }
@@ -512,23 +568,48 @@ export class AdminController {
         description,
       });
 
-      // Log audit event
-      await this.logService.createAuditLog({
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "role.created",
         resource: "role",
         resourceId: role.id.toString(),
+        changes: { after: { name, slug, description } },
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         timestamp: new Date(),
       });
 
-      res.status(201).json({
-        success: true,
-        message: "Role created successfully",
-        data: role,
+      await this.loggerService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_role_created",
+        eventCategory: "admin",
+        eventLabel: "Role Created",
+        page: "/admin/roles",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { action: "admin_role_created", roleId: role.id, name, slug },
+        timestamp: new Date(),
       });
+
+      res
+        .status(201)
+        .json({
+          success: true,
+          message: "Role created successfully",
+          data: role,
+        });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_role_create_exception",
+        severity: "medium",
+        description: `Error creating role: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { action: "admin_role_create_exception" },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -538,14 +619,13 @@ export class AdminController {
       const { roleId } = req.params;
       const updates = req.body;
       const adminId = (req as any).user.id;
-
-      const role = await this.roleService.updateRole(
-        parseInt(Array.isArray(roleId) ? roleId[0] : roleId),
-        updates,
+      const resolvedRoleId = parseInt(
+        Array.isArray(roleId) ? roleId[0] : roleId,
       );
 
-      // Log audit event
-      await this.logService.createAuditLog({
+      const role = await this.roleService.updateRole(resolvedRoleId, updates);
+
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "role.updated",
         resource: "role",
@@ -556,12 +636,42 @@ export class AdminController {
         timestamp: new Date(),
       });
 
+      await this.loggerService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_role_updated",
+        eventCategory: "admin",
+        eventLabel: "Role Updated",
+        page: "/admin/roles",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: {
+          action: "admin_role_updated",
+          roleId,
+          updatedFields: Object.keys(updates),
+        },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "Role updated successfully",
         data: role,
       });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_role_update_exception",
+        severity: "medium",
+        description: `Error updating role: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_role_update_exception",
+          roleId: req.params.roleId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -570,13 +680,13 @@ export class AdminController {
     try {
       const { roleId } = req.params;
       const adminId = (req as any).user.id;
-
-      await this.roleService.deleteRole(
-        parseInt(Array.isArray(roleId) ? roleId[0] : roleId),
+      const resolvedRoleId = parseInt(
+        Array.isArray(roleId) ? roleId[0] : roleId,
       );
 
-      // Log audit event
-      await this.logService.createAuditLog({
+      await this.roleService.deleteRole(resolvedRoleId);
+
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "role.deleted",
         resource: "role",
@@ -586,11 +696,46 @@ export class AdminController {
         timestamp: new Date(),
       });
 
-      res.json({
-        success: true,
-        message: "Role deleted successfully",
+      await this.loggerService.createSecurityEvent({
+        userId: adminId,
+        eventType: "admin_role_deleted",
+        severity: "high",
+        description: `Role ${roleId} was deleted by admin`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: true,
+        metadata: { action: "admin_role_deleted", roleId },
+        timestamp: new Date(),
       });
+
+      await this.loggerService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_role_deleted",
+        eventCategory: "admin",
+        eventLabel: "Role Deleted",
+        page: "/admin/roles",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: { action: "admin_role_deleted", roleId },
+        timestamp: new Date(),
+      });
+
+      res.json({ success: true, message: "Role deleted successfully" });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_role_delete_exception",
+        severity: "medium",
+        description: `Error deleting role: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_role_delete_exception",
+          roleId: req.params.roleId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -602,11 +747,7 @@ export class AdminController {
   ) => {
     try {
       const permissions = await this.roleService.getAllPermissions();
-
-      res.json({
-        success: true,
-        data: permissions,
-      });
+      res.json({ success: true, data: permissions });
     } catch (error: any) {
       next(error);
     }
@@ -629,22 +770,53 @@ export class AdminController {
         description,
       });
 
-      await this.logService.createAuditLog({
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "permission.created",
         resource: "permission",
         resourceId: permission.id.toString(),
+        changes: { after: { name, slug, resource, action } },
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         timestamp: new Date(),
       });
 
-      res.status(201).json({
-        success: true,
-        message: "Permission created successfully",
-        data: permission,
+      await this.loggerService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_permission_created",
+        eventCategory: "admin",
+        eventLabel: "Permission Created",
+        page: "/admin/permissions",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: {
+          action: "admin_permission_created",
+          permissionId: permission.id,
+          name,
+          slug,
+        },
+        timestamp: new Date(),
       });
-    } catch (error) {
+
+      res
+        .status(201)
+        .json({
+          success: true,
+          message: "Permission created successfully",
+          data: permission,
+        });
+    } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_permission_create_exception",
+        severity: "medium",
+        description: `Error creating permission: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: { action: "admin_permission_create_exception" },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -658,14 +830,16 @@ export class AdminController {
       const { roleId } = req.params;
       const { permissionIds } = req.body;
       const adminId = (req as any).user.id;
+      const resolvedRoleId = parseInt(
+        Array.isArray(roleId) ? roleId[0] : roleId,
+      );
 
       const role = await this.roleService.assignPermissionsToRole(
-        parseInt(Array.isArray(roleId) ? roleId[0] : roleId),
+        resolvedRoleId,
         permissionIds,
       );
 
-      // Log audit event
-      await this.logService.createAuditLog({
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "permissions.assigned",
         resource: "role",
@@ -676,12 +850,42 @@ export class AdminController {
         timestamp: new Date(),
       });
 
+      await this.loggerService.createActivityLog({
+        userId: adminId,
+        eventType: "admin_permissions_assigned",
+        eventCategory: "admin",
+        eventLabel: "Permissions Assigned",
+        page: "/admin/permissions",
+        sessionId: req.cookies?.access_token || "",
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        metadata: {
+          action: "admin_permissions_assigned",
+          roleId,
+          permissionIds,
+        },
+        timestamp: new Date(),
+      });
+
       res.json({
         success: true,
         message: "Permissions assigned successfully",
         data: role,
       });
     } catch (error: any) {
+      await this.loggerService.createSecurityEvent({
+        eventType: "admin_permissions_assign_exception",
+        severity: "medium",
+        description: `Error assigning permissions: ${error.message}`,
+        ipAddress: req.ip || "",
+        userAgent: req.get("user-agent") || "",
+        resolved: false,
+        metadata: {
+          action: "admin_permissions_assign_exception",
+          roleId: req.params.roleId,
+        },
+        timestamp: new Date(),
+      });
       next(error);
     }
   };
@@ -689,16 +893,9 @@ export class AdminController {
   getAllKeys = async (req: Request, res: Response) => {
     try {
       const keys = await this.apiKeyService.getAllApiKeys();
-      return res.status(200).json({
-        success: true,
-        data: keys,
-      });
+      return res.status(200).json({ success: true, data: keys });
     } catch (error: any) {
-      console.error("❌ [getAllKeys] error:", error);
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   };
 
@@ -707,31 +904,34 @@ export class AdminController {
       const { serviceId } = req.params;
       const { name, scopes, expiresInDays, description } = req.body;
       const adminId = (req as any).user.id;
+      const resolvedServiceId = Array.isArray(serviceId)
+        ? serviceId[0]
+        : serviceId;
 
-      // Validate required fields
       if (!name || !scopes || scopes.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Name and scopes are required",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Name and scopes are required" });
       }
 
       const apiKey = await this.apiKeyService.createApiKey({
         name,
-        serviceId: Array.isArray(serviceId) ? serviceId[0] : serviceId,
+        serviceId: resolvedServiceId,
         scopes,
         expiresInDays: expiresInDays || 90,
         description,
       });
-      await this.logService.createAuditLog({
+
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "api_key.created",
         resource: "api_key",
         resourceId: apiKey.id,
         performedBy: adminId,
+        changes: { after: { name, serviceId: resolvedServiceId, scopes } },
         metadata: {
           name,
-          serviceId: Array.isArray(serviceId) ? serviceId[0] : serviceId,
+          serviceId: resolvedServiceId,
           scopes,
           expiresInDays: expiresInDays || 90,
         },
@@ -740,23 +940,25 @@ export class AdminController {
         timestamp: new Date(),
       });
 
-      await this.logService.createSecurityEvent({
+      await this.loggerService.createSecurityEvent({
         userId: adminId,
         eventType: "api_key_created",
         severity: "medium",
-        description: `API key "${name}" created for service ${Array.isArray(serviceId) ? serviceId[0] : serviceId}`,
+        description: `API key "${name}" created for service ${resolvedServiceId}`,
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
         resolved: true,
         metadata: {
+          action: "api_key_created",
           apiKeyId: apiKey.id,
           name,
           scopes,
-          serviceId: Array.isArray(serviceId) ? serviceId[0] : serviceId,
+          serviceId: resolvedServiceId,
         },
         timestamp: new Date(),
       });
-      await this.logService.createActivityLog({
+
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_api_key_created",
         eventCategory: "admin",
@@ -765,19 +967,25 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { keyId: apiKey.id, name, serviceId, scopes },
+        metadata: {
+          action: "admin_api_key_created",
+          keyId: apiKey.id,
+          name,
+          serviceId,
+          scopes,
+        },
         timestamp: new Date(),
       });
-      return res.status(201).json({
-        success: true,
-        data: apiKey,
-        message: "API key created successfully",
-      });
+
+      return res
+        .status(201)
+        .json({
+          success: true,
+          data: apiKey,
+          message: "API key created successfully",
+        });
     } catch (error: any) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(400).json({ success: false, message: error.message });
     }
   };
 
@@ -785,19 +993,20 @@ export class AdminController {
     try {
       const { keyId } = req.params;
       const adminId = (req as any).user.id;
+      const resolvedKeyId = Array.isArray(keyId) ? keyId[0] : keyId;
 
-      const keyDetails = await this.apiKeyService.getApiKeyById(
-        Array.isArray(keyId) ? keyId[0] : keyId,
-      );
-      await this.apiKeyService.deleteApiKey(
-        Array.isArray(keyId) ? keyId[0] : keyId,
-      );
-      await this.logService.createAuditLog({
+      const keyDetails = await this.apiKeyService.getApiKeyById(resolvedKeyId);
+      await this.apiKeyService.deleteApiKey(resolvedKeyId);
+
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "api_key.deleted",
         resource: "api_key",
-        resourceId: Array.isArray(keyId) ? keyId[0] : keyId,
+        resourceId: resolvedKeyId,
         performedBy: adminId,
+        changes: {
+          before: { name: keyDetails?.name, serviceId: keyDetails?.serviceId },
+        },
         metadata: {
           keyName: keyDetails?.name,
           serviceId: keyDetails?.serviceId,
@@ -807,8 +1016,7 @@ export class AdminController {
         timestamp: new Date(),
       });
 
-      // ⚠️ ADD HERE - Security event
-      await this.logService.createSecurityEvent({
+      await this.loggerService.createSecurityEvent({
         userId: adminId,
         eventType: "api_key_deleted",
         severity: "high",
@@ -817,13 +1025,14 @@ export class AdminController {
         userAgent: req.get("user-agent") || "",
         resolved: true,
         metadata: {
-          keyId: Array.isArray(keyId) ? keyId[0] : keyId,
+          action: "api_key_deleted",
+          keyId: resolvedKeyId,
           keyName: keyDetails?.name,
         },
         timestamp: new Date(),
       });
 
-      await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_api_key_deleted",
         eventCategory: "admin",
@@ -832,39 +1041,44 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { keyId, keyName: keyDetails?.name, serviceId: keyDetails?.serviceId },
+        metadata: {
+          action: "admin_api_key_deleted",
+          keyId,
+          keyName: keyDetails?.name,
+          serviceId: keyDetails?.serviceId,
+        },
         timestamp: new Date(),
       });
-      return res.status(200).json({
-        success: true,
-        message: "API key deleted successfully",
-      });
+
+      return res
+        .status(200)
+        .json({ success: true, message: "API key deleted successfully" });
     } catch (error: any) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(400).json({ success: false, message: error.message });
     }
   };
 
-  // POST /api/keys/:keyId/rotate - Rotate API key
   rotateKey = async (req: Request, res: Response) => {
     try {
       const { keyId } = req.params;
       const adminId = (req as any).user.id;
+      const resolvedKeyId = Array.isArray(keyId) ? keyId[0] : keyId;
 
-      const apiKey = await this.apiKeyService.rotateApiKey(
-        Array.isArray(keyId) ? keyId[0] : keyId,
-      );
-      await this.logService.createAuditLog({
+      const apiKey = await this.apiKeyService.rotateApiKey(resolvedKeyId);
+
+      await this.loggerService.createAuditLog({
         userId: adminId,
         action: "api_key.rotated",
         resource: "api_key",
-        resourceId: Array.isArray(keyId) ? keyId[0] : keyId,
+        resourceId: resolvedKeyId,
         performedBy: adminId,
+        changes: {
+          before: { keyId: resolvedKeyId },
+          after: { keyId: apiKey.id },
+        },
         metadata: {
           keyName: apiKey.name,
-          oldKeyId: Array.isArray(keyId) ? keyId[0] : keyId,
+          oldKeyId: resolvedKeyId,
           newKeyId: apiKey.id,
         },
         ipAddress: req.ip || "",
@@ -872,8 +1086,7 @@ export class AdminController {
         timestamp: new Date(),
       });
 
-      // ⚠️ ADD HERE - Security event
-      await this.logService.createSecurityEvent({
+      await this.loggerService.createSecurityEvent({
         userId: adminId,
         eventType: "api_key_rotated",
         severity: "medium",
@@ -882,13 +1095,14 @@ export class AdminController {
         userAgent: req.get("user-agent") || "",
         resolved: true,
         metadata: {
-          oldKeyId: Array.isArray(keyId) ? keyId[0] : keyId,
+          action: "api_key_rotated",
+          oldKeyId: resolvedKeyId,
           newKeyId: apiKey.id,
         },
         timestamp: new Date(),
       });
 
-       await this.logService.createActivityLog({
+      await this.loggerService.createActivityLog({
         userId: adminId,
         eventType: "admin_api_key_rotated",
         eventCategory: "admin",
@@ -897,50 +1111,47 @@ export class AdminController {
         sessionId: req.cookies?.access_token || "",
         ipAddress: req.ip || "",
         userAgent: req.get("user-agent") || "",
-        metadata: { oldKeyId: keyId, newKeyId: apiKey.id, keyName: apiKey.name },
+        metadata: {
+          action: "admin_api_key_rotated",
+          oldKeyId: keyId,
+          newKeyId: apiKey.id,
+          keyName: apiKey.name,
+        },
         timestamp: new Date(),
       });
-      return res.status(200).json({
-        success: true,
-        data: apiKey,
-        message: "API key rotated successfully",
-      });
+
+      return res
+        .status(200)
+        .json({
+          success: true,
+          data: apiKey,
+          message: "API key rotated successfully",
+        });
     } catch (error: any) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(400).json({ success: false, message: error.message });
     }
   };
 
   validateKey = async (req: Request, res: Response) => {
-    const requestId = req.headers["x-request-id"] || Date.now();
-
     try {
       const { apiKey, serviceId } = req.body;
 
-      /* ================= INPUT VALIDATION ================= */
-
       if (!apiKey) {
-        return res.status(400).json({
-          success: false,
-          message: "API key is required",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "API key is required" });
       }
 
       if (!serviceId) {
-        return res.status(400).json({
-          success: false,
-          message: "serviceId is required",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "serviceId is required" });
       }
-
-      /* ================= KEY VALIDATION ================= */
 
       const result = await this.apiKeyService.validateApiKey(apiKey, serviceId);
 
       if (!result.valid) {
-        await this.logService.createSecurityEvent({
+        await this.loggerService.createSecurityEvent({
           eventType: "api_key_validation_failed",
           severity: "medium",
           description: `Invalid API key validation attempt: ${result.message}`,
@@ -948,30 +1159,27 @@ export class AdminController {
           userAgent: req.get("user-agent") || "",
           resolved: true,
           metadata: {
+            action: "api_key_validation_failed",
             reason: result.message,
             attemptedKey: apiKey.substring(0, 10) + "...",
           },
           timestamp: new Date(),
         });
 
-        return res.status(401).json({
-          success: false,
-          message: result.message,
-        });
+        return res
+          .status(401)
+          .json({ success: false, message: result.message });
       }
 
-      /* ================= SUCCESS ================= */
-
-      return res.status(200).json({
-        success: true,
-        message: "API key is valid",
-        data: result.data,
-      });
+      return res
+        .status(200)
+        .json({
+          success: true,
+          message: "API key is valid",
+          data: result.data,
+        });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   };
 }

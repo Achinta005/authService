@@ -1,18 +1,20 @@
 import { Request, Response, NextFunction } from "express";
-import { ApiKeyService } from "../services/apiKeyService";
+import axios from "axios";
+
+declare global {
+  namespace Express {
+    interface Request {
+      apiKey?: any;
+    }
+  }
+}
 
 export class ApiKeyMiddleware {
-  private apiKeyService: ApiKeyService;
-
-  constructor() {
-    this.apiKeyService = new ApiKeyService();
-  }
-
-  // Middleware to validate API key and check for specific permission
   requirePermission = (...requiredPermissions: string[]) => {
     return async (req: Request, res: Response, next: NextFunction) => {
       try {
         const apiKey = req.headers["x-api-key"] as string;
+
         if (!apiKey) {
           return res.status(401).json({
             success: false,
@@ -20,22 +22,26 @@ export class ApiKeyMiddleware {
           });
         }
 
-        // Validate API key
-        const result = await this.apiKeyService.validateApiKey(
-          apiKey,
-          "auth-service",
+        const { data } = await axios.post(
+          `${process.env.LOG_SERVICE_URL}/api/valid`,
+          { apiKey, serviceId: "auth-service" },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": process.env.LOG_MICROSERVICE_API_KEY,
+            },
+            timeout: 5000,
+          }
         );
 
-        if (!result.valid || !result.data) {
+        if (!data.success || !data.data) {
           return res.status(401).json({
             success: false,
-            message: result.message || "Invalid API key",
+            message: data.message || "Invalid API key",
           });
         }
 
-        const scopes = Array.isArray(result.data.scopes)
-          ? result.data.scopes
-          : [];
+        const scopes = Array.isArray(data.data.scopes) ? data.data.scopes : [];
 
         const hasPermission =
           scopes.includes("admin") ||
@@ -48,8 +54,15 @@ export class ApiKeyMiddleware {
           });
         }
 
+        req.apiKey = data.data;
         next();
       } catch (error: any) {
+        if (error.response) {
+          return res.status(401).json({
+            success: false,
+            message: error.response.data?.message || "Invalid API key",
+          });
+        }
         return res.status(500).json({
           success: false,
           message: "Internal server error",

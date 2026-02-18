@@ -3,8 +3,9 @@ import { AuthController } from "../controller/authController";
 import { SupabaseAuthService } from "../services/superbaseAuthService";
 import { UserProfileService } from "../services/userProfileService";
 import { RoleService } from "../services/roleService";
-import { LogService } from "../services/logService";
+import { AnalyticsService } from "../services/analyticsService";
 import { ApiKeyMiddleware } from "../middlewares/apiKeyMiddleware";
+import { LoggerService } from "../lib/activityLogger";
 
 import {
   registerValidator,
@@ -27,7 +28,8 @@ export const createAuthRoutes = () => {
     new SupabaseAuthService(),
     new UserProfileService(),
     new RoleService(),
-    new LogService(),
+    new AnalyticsService(),
+    new LoggerService(),
   );
 
   router.post(
