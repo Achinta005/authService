@@ -105,6 +105,12 @@ export const createAuthRoutes = () => {
     authController.resendVerification,
   );
 
+  router.get(
+    "/me",
+    apiKeyMiddleware.requirePermission("admin"),
+    authController.getMe,
+  );
+
   router.post(
     "/refresh",
     apiKeyMiddleware.requirePermission("admin"),

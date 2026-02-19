@@ -418,6 +418,48 @@ export class AuthController {
     }
   };
 
+  getMe = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authHeader = req.headers.authorization;
+      const access_token = authHeader?.startsWith("Bearer ")
+        ? authHeader.split(" ")[1]
+        : req.cookies?.access_token;
+
+      if (!access_token) {
+        return res.status(401).json({
+          success: false,
+          message: "No access token provided",
+        });
+      }
+
+      const user = await this.supabaseAuth.getUserFromToken(access_token);
+
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid or expired access token",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        user: { id: user.id, email: user.email },
+        accessToken: access_token,
+      });
+    } catch (error: any) {
+      if (
+        error.code === "bad_jwt" ||
+        error.code === "invalid_jwt" ||
+        error.status === 403
+      ) {
+        return res.status(401).json({
+          success: false,
+          message: "Access token expired",
+        });
+      }
+      next(error);
+    }
+  };
   refreshToken = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const refresh_token =
@@ -429,7 +471,7 @@ export class AuthController {
           message: "No refresh token provided",
         });
       }
-
+      console.log("rf token", refresh_token);
       const { session, user } =
         await this.supabaseAuth.refreshSession(refresh_token);
 
@@ -450,20 +492,6 @@ export class AuthController {
           message: "Invalid refresh token",
         });
       }
-
-      res.cookie("access_token", session.access_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 1000,
-      });
-
-      res.cookie("refresh_token", session.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
 
       res.json({
         success: true,
