@@ -209,46 +209,48 @@ export class UserController {
       );
 
       if (!hasValidField) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "No valid preference fields to update",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "No valid preference fields to update",
+        });
       }
+
+      const isThemeOnlyUpdate =
+        Object.keys(updates).length === 1 && updates.theme !== undefined;
 
       const preferences = await this.userProfileService.updatePreferences(
         userId,
         updates,
       );
 
-      await this.loggerService.createAuditLog({
-        userId,
-        action: "preferences.updated",
-        resource: "user_preferences",
-        resourceId: userId,
-        changes: { after: updates },
-        ipAddress: req.ip || "",
-        userAgent: req.get("user-agent") || "",
-        timestamp: new Date(),
-      });
+      if (!isThemeOnlyUpdate) {
+        await this.loggerService.createAuditLog({
+          userId,
+          action: "preferences.updated",
+          resource: "user_preferences",
+          resourceId: userId,
+          changes: { after: updates },
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          timestamp: new Date(),
+        });
 
-      await this.loggerService.createActivityLog({
-        userId,
-        eventType: "preferences_updated",
-        eventCategory: "user",
-        eventLabel: "Preferences Update",
-        page: "/profile/preferences",
-        sessionId: req.cookies?.access_token || "",
-        ipAddress: req.ip || "",
-        userAgent: req.get("user-agent") || "",
-        metadata: {
-          action: "preferences_updated",
-          updatedFields: Object.keys(updates),
-        },
-        timestamp: new Date(),
-      });
-
+        await this.loggerService.createActivityLog({
+          userId,
+          eventType: "preferences_updated",
+          eventCategory: "user",
+          eventLabel: "Preferences Update",
+          page: "/profile/preferences",
+          sessionId: req.cookies?.access_token || "",
+          ipAddress: req.ip || "",
+          userAgent: req.get("user-agent") || "",
+          metadata: {
+            action: "preferences_updated",
+            updatedFields: Object.keys(updates),
+          },
+          timestamp: new Date(),
+        });
+      }
       res.json({
         success: true,
         message: "Preferences updated successfully",
