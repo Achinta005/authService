@@ -59,7 +59,6 @@ export const createAuthRoutes = () => {
 
   router.get(
     "/oauth/:provider",
-    apiKeyMiddleware.requirePermission("admin"),
     authController.oauthLogin,
   );
 
