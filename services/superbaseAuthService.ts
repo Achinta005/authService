@@ -1,5 +1,5 @@
-import { supabaseAdmin, supabaseClient } from "../config/superbase";
-import { createClient, User } from "@supabase/supabase-js";
+import { supabaseAdmin, supabaseClient } from '../config/superbase';
+import { createClient, User } from '@supabase/supabase-js';
 
 export class SupabaseAuthService {
   async getUserByEmail(email: string) {
@@ -11,7 +11,7 @@ export class SupabaseAuthService {
       const user = data.users.find((u) => u.email === email);
       return user || null;
     } catch (error) {
-      console.error("Error fetching user by email:", error);
+      console.error('Error fetching user by email:', error);
       return null;
     }
   }
@@ -60,7 +60,7 @@ export class SupabaseAuthService {
 
   // ============ OAUTH LOGIN ============
   async signInWithOAuth(
-    provider: "google" | "github" | "facebook",
+    provider: 'google' | 'github' | 'facebook',
     redirectTo: string,
   ) {
     const { data, error } = await supabaseClient.auth.signInWithOAuth({
@@ -101,7 +101,7 @@ export class SupabaseAuthService {
     const { data, error } = await supabaseClient.auth.verifyOtp({
       phone,
       token,
-      type: "sms",
+      type: 'sms',
     });
 
     if (error) throw error;
@@ -122,7 +122,7 @@ export class SupabaseAuthService {
     } = await adminClient.auth.getUser(accessToken);
 
     if (error || !user) {
-      throw new Error("Invalid or expired session");
+      throw new Error('Invalid or expired session');
     }
 
     // 2️⃣ Revoke ALL sessions for this user
@@ -174,9 +174,9 @@ export class SupabaseAuthService {
   }
 
   // ============ RESEND VERIFICATION EMAIL ============
-  async resendVerificationEmail(email: string,emailRedirectTo:string) {
+  async resendVerificationEmail(email: string, emailRedirectTo: string) {
     const { data, error } = await supabaseClient.auth.resend({
-      type: "signup",
+      type: 'signup',
       email,
       options: {
         emailRedirectTo: emailRedirectTo,
@@ -191,8 +191,8 @@ export class SupabaseAuthService {
   async enrollMFA(accessToken: string) {
     // User must be authenticated
     const { data, error } = await supabaseAdmin.auth.mfa.enroll({
-      factorType: "totp",
-      friendlyName: "Authenticator App",
+      factorType: 'totp',
+      friendlyName: 'Authenticator App',
     });
 
     if (error) throw error;
@@ -278,7 +278,11 @@ export class SupabaseAuthService {
   }
 
   // ============ ADMIN: INVITE USER BY EMAIL ============
-  async inviteUserByEmail(email: string,emailRedirectTo:string, metadata?: Record<string, any>) {
+  async inviteUserByEmail(
+    email: string,
+    emailRedirectTo: string,
+    metadata?: Record<string, any>,
+  ) {
     const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       email,
       {
@@ -292,35 +296,39 @@ export class SupabaseAuthService {
   }
 
   // ============ ADMIN: GENERATE LINK (Magic Link, Recovery, etc.) ============
-  async generateLink(type: "signup" | "magiclink" | "recovery", email: string,emailRedirectTo:string) {
+  async generateLink(
+    type: 'signup' | 'magiclink' | 'recovery',
+    email: string,
+    emailRedirectTo: string,
+  ) {
     let params: any;
 
-    if (type === "signup") {
+    if (type === 'signup') {
       params = {
-        type: "signup",
+        type: 'signup',
         email,
         options: {
           redirectTo: emailRedirectTo,
         },
       };
-    } else if (type === "magiclink") {
+    } else if (type === 'magiclink') {
       params = {
-        type: "magiclink",
+        type: 'magiclink',
         email,
         options: {
           redirectTo: emailRedirectTo,
         },
       };
-    } else if (type === "recovery") {
+    } else if (type === 'recovery') {
       params = {
-        type: "recovery",
+        type: 'recovery',
         email,
         options: {
           redirectTo: emailRedirectTo,
         },
       };
     } else {
-      throw new Error("Invalid link type");
+      throw new Error('Invalid link type');
     }
 
     const { data, error } = await supabaseAdmin.auth.admin.generateLink(params);
