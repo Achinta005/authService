@@ -393,26 +393,33 @@ export class AuthController {
   refreshToken = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const refresh_token =
-        req.cookies?.refresh_token || req.body.refresh_token;
-        
-      console.log('Refresh Req Get...');
-      console.log('Refresh Token...', refresh_token);
+        req.cookies?.refresh_token || req.body?.refresh_token;
 
-    
       if (!refresh_token) {
         return res.status(401).json({
           success: false,
           message: 'No refresh token provided',
+          code: 'no_refresh_token',
         });
       }
 
-      let accessToken: string;
-      let newRefreshToken: string;
       let session: any;
       let user: any;
 
       try {
-        const data = await this.supabaseAuth.refreshSession(refresh_token);
+        // ✅ Fresh Supabase client — avoids session state pollution
+        const { createClient } = await import('@supabase/supabase-js');
+        const freshClient = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_ANON_KEY!,
+        );
+
+        const { data, error } = await freshClient.auth.refreshSession({
+          refresh_token,
+        });
+
+        if (error) throw error;
+
         session = data.session;
         user = data.user;
 
@@ -420,30 +427,35 @@ export class AuthController {
           return res.status(401).json({
             success: false,
             message: 'Invalid refresh token',
+            code: 'invalid_refresh_token',
           });
         }
 
-        accessToken = session.access_token;
-        newRefreshToken = session.refresh_token;
-
-        // ✅ Cache the rotation so duplicate calls get same result
-        await cacheTokenRotation(refresh_token, accessToken, newRefreshToken);
+        // ✅ Cache rotation for replay-attack deduplication
+        await cacheTokenRotation(
+          refresh_token,
+          session.access_token,
+          session.refresh_token,
+        );
       } catch (error: any) {
-        if (error.code === 'refresh_token_already_used') {
-          // ✅ Token was already rotated — return cached new tokens
-          const cached = await getCachedTokenRotation(refresh_token);
+        // Log exact Supabase error for debugging
+        console.error('[REFRESH] Supabase error:', {
+          code: error.code,
+          message: error.message,
+          status: error.status,
+        });
 
+        // Already rotated — return cached tokens
+        if (error.code === 'refresh_token_already_used') {
+          const cached = await getCachedTokenRotation(refresh_token);
           if (cached) {
             return res.json({
               success: true,
               accessToken: cached.newAccessToken,
               refreshToken: cached.newRefreshToken,
               expiresIn: 3600,
-              source: 'cache', // helpful for debugging, remove in prod
             });
           }
-
-          // Cache expired or missing — token is genuinely replayed, force re-login
           return res.status(401).json({
             success: false,
             message: 'Session expired, please log in again',
@@ -451,28 +463,43 @@ export class AuthController {
           });
         }
 
-        throw error; // unknown error — let outer catch handle it
+        // Any other Supabase rejection — session is dead
+        if (
+          error.status === 400 ||
+          error.status === 401 ||
+          error.message?.toLowerCase().includes('invalid') ||
+          error.message?.toLowerCase().includes('expired') ||
+          error.message?.toLowerCase().includes('not found')
+        ) {
+          return res.status(401).json({
+            success: false,
+            message: 'Session expired, please log in again',
+            code: 'session_expired',
+          });
+        }
+
+        throw error; // unknown — let outer catch handle
       }
 
       return res.json({
         success: true,
-        accessToken,
-        refreshToken: newRefreshToken,
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token,
         expiresIn: 3600,
         user: { id: user.id, email: user.email },
       });
     } catch (error: any) {
+      console.error('[REFRESH] Unhandled exception:', error.message);
       await this.loggerService.createSecurityEvent({
         eventType: 'token_refresh_exception',
         severity: 'high',
-        description: `Unhandled error during token refresh: ${error.message}`,
+        description: `Token refresh failed: ${error.message}`,
         ipAddress: req.ip || '',
         userAgent: req.get('user-agent') || '',
         resolved: false,
-        metadata: { action: 'token_refresh_exception', errorName: error.name },
+        metadata: { errorName: error.name, errorCode: error.code },
         timestamp: new Date(),
       });
-
       next(error);
     }
   };
