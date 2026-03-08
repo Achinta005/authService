@@ -394,7 +394,11 @@ export class AuthController {
     try {
       const refresh_token =
         req.cookies?.refresh_token || req.body.refresh_token;
+        
+      console.log('Refresh Req Get...');
+      console.log('Refresh Token...', refresh_token);
 
+    
       if (!refresh_token) {
         return res.status(401).json({
           success: false,
