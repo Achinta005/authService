@@ -31,9 +31,9 @@ app.use(
   }),
 );
 
-app.use(generalLimiter);
-
 app.set('trust proxy', 1);
+
+app.use(generalLimiter);
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({

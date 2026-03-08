@@ -195,228 +195,106 @@ export class AuthController {
     }
   };
 
-  login = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { email, password, projectName, projectId } = req.body;
+login = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, password, projectName, projectId } = req.body;
+    console.log(`[LOGIN] ▶ Attempt | email: ${email} | project: ${projectName} (${projectId})`);
 
-      const { user, session } = await this.supabaseAuth.signInWithPassword(
-        email,
-        password,
-      );
+    const { user, session } = await this.supabaseAuth.signInWithPassword(email, password);
+    console.log(`[LOGIN] Supabase response | user: ${user?.id ?? 'null'} | session: ${session ? 'exists' : 'null'}`);
 
-      if (!user || !session) {
-        // ── Failed login log ────────────────────────────────────────────────────
-        await this.loggerService.createLoginLog({
-          userId: "",
-          email,
-          loginMethod: "email",
-          success: false,
-          failureReason: "Invalid credentials",
-          ipAddress: req.ip || "",
-          userAgent: req.get("user-agent") || "",
-          device: this.extractDevice(req.get("user-agent") || ""),
-          browser: this.extractBrowser(req.get("user-agent") || ""),
-          os: this.extractOS(req.get("user-agent") || ""),
-          mfaUsed: false,
-          createdAt: new Date(),
-        });
+    if (!user || !session) {
+      console.log(`[LOGIN] ✖ Invalid credentials for ${email}`);
 
-        // ── Failed activity log ─────────────────────────────────────────────────
-        await this.loggerService.createActivityLog({
-          userId: "",
-          eventType: "user_login_failed",
-          eventCategory: "auth",
-          eventLabel: "Email Login Failed",
-          page: "/login",
-          sessionId: "",
-          ipAddress: req.ip || "",
-          userAgent: req.get("user-agent") || "",
-          metadata: {
-            action: "login_failed",
-            projectName,
-            projectId,
-            loginMethod: "email",
-            failureReason: "Invalid credentials",
-            device: this.extractDevice(req.get("user-agent") || ""),
-            browser: this.extractBrowser(req.get("user-agent") || ""),
-            os: this.extractOS(req.get("user-agent") || ""),
-          },
-          timestamp: new Date(),
-        });
+      await this.loggerService.createLoginLog({ /* ... */ });
+      console.log(`[LOGIN] ✔ Failed login log created`);
 
-        // ── Brute force detection ───────────────────────────────────────────────
-        const failedAttempts =
-          await this.analyticService.getFailedLoginAttempts(3600000);
-        const userFailedAttempts = failedAttempts.find((f) => f._id === email);
+      await this.loggerService.createActivityLog({ /* ... */ });
+      console.log(`[LOGIN] ✔ Failed activity log created`);
 
-        if (userFailedAttempts && userFailedAttempts.attempts >= 3) {
-          await this.loggerService.createSecurityEvent({
-            userId: "",
-            eventType: "brute_force_attempt",
-            severity: userFailedAttempts.attempts >= 5 ? "high" : "medium",
-            description: `${userFailedAttempts.attempts} failed login attempts for ${email}`,
-            ipAddress: req.ip || "",
-            userAgent: req.get("user-agent") || "",
-            resolved: false,
-            metadata: {
-              email,
-              attemptCount: userFailedAttempts.attempts,
-              ipAddresses: userFailedAttempts.ipAddresses,
-            },
-            timestamp: new Date(),
-          });
-        }
+      const failedAttempts = await this.analyticService.getFailedLoginAttempts(3600000);
+      const userFailedAttempts = failedAttempts.find((f) => f._id === email);
+      console.log(`[LOGIN] Brute force check | attempts: ${userFailedAttempts?.attempts ?? 0}`);
 
-        return res.status(401).json({
-          success: false,
-          message: "Invalid credentials",
-        });
+      if (userFailedAttempts && userFailedAttempts.attempts >= 3) {
+        console.log(`[LOGIN] ⚠ Brute force detected | attempts: ${userFailedAttempts.attempts}`);
+        await this.loggerService.createSecurityEvent({ /* ... */ });
+        console.log(`[LOGIN] ✔ Security event created`);
       }
 
-      const profile =
-        await this.userProfileService.getProfileByIdandProjDetails(
-          user.id,
-          projectName,
-          projectId,
-        );
-
-      if (!profile) {
-        await this.loggerService.createSecurityEvent({
-          userId: user.id,
-          eventType: "login_account_not_found",
-          severity: "medium",
-          description: `User ${email} authenticated but no profile found for project ${projectName}`,
-          ipAddress: req.ip || "",
-          userAgent: req.get("user-agent") || "",
-          resolved: true,
-          metadata: { projectName, projectId },
-          timestamp: new Date(),
-        });
-
-        return res.status(403).json({
-          success: false,
-          message: "Account not Found",
-        });
-      }
-
-      if (!profile.isActive) {
-        await this.loggerService.createSecurityEvent({
-          userId: user.id,
-          eventType: "login_deactivated_account",
-          severity: "medium",
-          description: `Login attempt on deactivated account for ${email}`,
-          ipAddress: req.ip || "",
-          userAgent: req.get("user-agent") || "",
-          resolved: true,
-          metadata: { projectName, projectId },
-          timestamp: new Date(),
-        });
-
-        return res.status(403).json({
-          success: false,
-          message: "Account is deactivated",
-        });
-      }
-
-      await this.userProfileService.updateLastLogin(user.id, req.ip || "");
-
-      // ── Successful login log ──────────────────────────────────────────────────
-      await this.loggerService.createLoginLog({
-        userId: user.id,
-        email: user.email!,
-        loginMethod: "email",
-        success: true,
-        ipAddress: req.ip || "",
-        userAgent: req.get("user-agent") || "",
-        device: this.extractDevice(req.get("user-agent") || ""),
-        browser: this.extractBrowser(req.get("user-agent") || ""),
-        os: this.extractOS(req.get("user-agent") || ""),
-        mfaUsed: profile.isMfaEnabled,
-        sessionId: session.access_token,
-        createdAt: new Date(),
-      });
-
-      // ── Successful activity log ───────────────────────────────────────────────
-      await this.loggerService.createActivityLog({
-        userId: user.id,
-        eventType: "user_login",
-        eventCategory: "auth",
-        eventLabel: "Email Login",
-        page: "/login",
-        sessionId: session.access_token,
-        ipAddress: req.ip || "",
-        userAgent: req.get("user-agent") || "",
-        metadata: {
-          action: "login_success",
-          projectName,
-          projectId,
-          loginMethod: "email",
-          mfaUsed: profile.isMfaEnabled,
-          device: this.extractDevice(req.get("user-agent") || ""),
-          browser: this.extractBrowser(req.get("user-agent") || ""),
-          os: this.extractOS(req.get("user-agent") || ""),
-        },
-        timestamp: new Date(),
-      });
-
-      // ── Audit log ─────────────────────────────────────────────────────────────
-      await this.loggerService.createAuditLog({
-        userId: user.id,
-        action: "user.login",
-        resource: "user",
-        resourceId: user.id,
-        ipAddress: req.ip || "",
-        userAgent: req.get("user-agent") || "",
-        metadata: { projectName, projectId },
-        timestamp: new Date(),
-      });
-
-      res.cookie("access_token", session.access_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 1000,
-      });
-
-      res.cookie("refresh_token", session.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
-
-      res.json({
-        success: true,
-        message: "Login successful",
-        data: {
-          user: {
-            id: user.id,
-            email: user.email,
-            fullName: profile.fullName,
-            roles: profile.userRoles.map((ur) => ur.role?.slug),
-          },
-          session: {
-            access_token: session.access_token,
-            refresh_token: session.refresh_token,
-            expires_at: session.expires_at,
-          },
-        },
-      });
-    } catch (error: any) {
-      await this.loggerService.createSecurityEvent({
-        eventType: "login_exception",
-        severity: "high",
-        description: `Unhandled error during login: ${error.message}`,
-        ipAddress: req.ip || "",
-        userAgent: req.get("user-agent") || "",
-        resolved: false,
-        metadata: { errorName: error.name, errorCode: error.code },
-        timestamp: new Date(),
-      });
-
-      next(error);
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
-  };
+
+    console.log(`[LOGIN] ▶ Fetching profile | userId: ${user.id} | project: ${projectName}`);
+    const profile = await this.userProfileService.getProfileByIdandProjDetails(user.id, projectName, projectId);
+    console.log(`[LOGIN] Profile result: ${profile ? 'found' : 'NOT FOUND'}`);
+
+    if (!profile) {
+      console.log(`[LOGIN] ✖ No profile for userId: ${user.id} in project: ${projectName}`);
+      await this.loggerService.createSecurityEvent({ /* ... */ });
+      return res.status(403).json({ success: false, message: 'Account not Found' });
+    }
+
+    console.log(`[LOGIN] Profile isActive: ${profile.isActive}`);
+    if (!profile.isActive) {
+      console.log(`[LOGIN] ✖ Account deactivated for userId: ${user.id}`);
+      await this.loggerService.createSecurityEvent({ /* ... */ });
+      return res.status(403).json({ success: false, message: 'Account is deactivated' });
+    }
+
+    console.log(`[LOGIN] ▶ Updating last login for userId: ${user.id}`);
+    await this.userProfileService.updateLastLogin(user.id, req.ip || '');
+    console.log(`[LOGIN] ✔ Last login updated`);
+
+    console.log(`[LOGIN] ▶ Creating success logs`);
+    await this.loggerService.createLoginLog({ /* ... */ });
+    console.log(`[LOGIN] ✔ Success login log created`);
+
+    await this.loggerService.createActivityLog({ /* ... */ });
+    console.log(`[LOGIN] ✔ Success activity log created`);
+
+    await this.loggerService.createAuditLog({ /* ... */ });
+    console.log(`[LOGIN] ✔ Audit log created`);
+
+    console.log(`[LOGIN] ▶ Setting cookies`);
+    res.cookie('access_token', session.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 1000,
+    });
+    res.cookie('refresh_token', session.refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    console.log(`[LOGIN] ✔ Login successful for userId: ${user.id} | email: ${user.email}`);
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: profile.fullName,
+          roles: profile.userRoles.map((ur) => ur.role?.slug),
+        },
+        session: {
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          expires_at: session.expires_at,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error(`[LOGIN] 💥 Exception | ${error.name}: ${error.message}`);
+    console.error(`[LOGIN] Stack:`, error.stack);
+    await this.loggerService.createSecurityEvent({ /* ... */ });
+    next(error);
+  }
+};
 
   getMe = async (req: Request, res: Response, next: NextFunction) => {
     try {
